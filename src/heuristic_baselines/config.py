@@ -52,6 +52,23 @@ KNOWN_HEURISTIC_ALGORITHMS: frozenset[str] = frozenset(
     ("pwd", "msptd", "fft", "autocorr", "heartpy", "neurokit", "qppgfast")
 )
 
+# =============================================================================
+# HRV / PRV settings (used by hrv_runner.py only)
+# =============================================================================
+# hrv_runner.py reuses HEURISTIC_PIPELINE_PARTICIPANTS / DEVICE_ROLES /
+# PPG_CHANNELS / RUN_PREPROCESS above, and computes HRV per window with
+# NeuroKit2 (nk.hrv_time / nk.hrv_frequency / nk.hrv_nonlinear).
+#
+# These windows are produced at 5 min (300 s) each, which is the standard
+# short-term HRV recording length (Task Force, 1996). At 5 min, time-domain
+# (RMSSD, SDNN), frequency-domain (LF/HF), and Poincaré (SD1/SD2) are all valid.
+HRV_WINDOW_SEC: float = 300.0
+# Compute frequency-domain (LF/HF/LFn/HFn/TP). Valid at >=2-5 min; turn OFF if
+# you ever run this on short (<60 s) windows.
+HRV_COMPUTE_FREQ: bool = True
+# Compute nonlinear Poincaré indices (SD1/SD2/SD1SD2).
+HRV_COMPUTE_NONLINEAR: bool = True
+
 
 def _resolve_heuristic_windows_root() -> Path:
     key = HEURISTIC_DATA_SOURCE.strip().lower()
