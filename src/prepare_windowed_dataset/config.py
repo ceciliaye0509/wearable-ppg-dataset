@@ -7,7 +7,7 @@ Raw NPZ is read from the sibling HuggingFace dataset tree (fixed layout)::
       <this-repo>/src/prepare_windowed_dataset/    (PACKAGE_ROOT)
       Multisite-PPG/    # HuggingFace ``snowballlab/Multisite-PPG`` (``local_dir`` default)
           raw_data/<Px>/...               (``WINDOW_DATA_SOURCE="full"``)
-          sample_data/raw_data/<Px>/...   (``WINDOW_DATA_SOURCE="sample"``)
+          sample_data/raw_data/<Px>/...   (``WINDOW_DATA_SOURCE = "full"``)
 
 Window outputs are written under this package::
 
@@ -33,16 +33,19 @@ WINDOW_HF_SUBMISSION_ROOT: Path = (
 # Manual settings (edit here only)
 # =============================================================================
 # Participants to process in batch mode.
-PIPELINE_PARTICIPANTS: list[str] = ["P7", "P8"]
+PIPELINE_PARTICIPANTS: list[str] = [
+    "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10",
+    "P11", "P12", "P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20",
+]
 
 # Wearables (must match filenames; available: Earring, Ring, Necklace, Watch;
 # e.g. P1_Earring_raw.npz -> "Earring").
-WEARABLE_DEVICE_ROLES: tuple[str, ...] = ("Earring",)
+WEARABLE_DEVICE_ROLES: tuple[str, ...] = ("Earring", "Ring", "Necklace", "Watch")
 
 # Which HF raw_data tree to read.
 # "sample" -> .../sample_data/raw_data/<Px>/...
 # "full" -> .../raw_data/<Px>/...
-WINDOW_DATA_SOURCE: str = "sample"
+WINDOW_DATA_SOURCE: str = "full"
 
 
 def _resolve_window_input_root() -> Path:
@@ -65,8 +68,8 @@ DATALOADER_PIPELINE_PARTICIPANTS = PIPELINE_PARTICIPANTS
 DATA_LOADER_ROOT = PACKAGE_ROOT
 
 # Windowing and ECG constants
-ALIGNMENT_WINDOW_SEC = 8.0
-ALIGNMENT_WINDOW_STRIDE_SEC = 1.0
+ALIGNMENT_WINDOW_SEC = 300.0           # 5 minutes (for HRV analysis)
+ALIGNMENT_WINDOW_STRIDE_SEC = 20.0     # stride for ~93% overlap
 ECG_FS = 130.0
 PPG_WINDOW_GAP_THRESHOLD_MS = 15.0
 ECG_MIN_SAMPLES_FRAC = 0.95

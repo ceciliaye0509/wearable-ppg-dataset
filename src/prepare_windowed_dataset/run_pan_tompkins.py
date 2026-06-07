@@ -30,9 +30,12 @@ except ImportError:
 # Common thresholds (tune here)
 MIN_HR = 40.0
 MAX_HR = 180.0
-MIN_BEATS = 4
+MIN_BEATS = 150
 RR_LOW_SEC = 0.25
 RR_HIGH_SEC = 2.0
+
+# Max R-peaks per window for padding (180 bpm × 5 min = 900)
+MAX_PEAKS_PER_WINDOW = 900
 
 
 def _safe_quality_label(value: object) -> str:
@@ -140,7 +143,9 @@ def _safe_quality_label(value: object) -> str:
 #         return np.nan, 0, "unknown", 0, "exception"
 
 
-def ecg_window_check(ecg_uv: np.ndarray, sampling_rate: float) -> tuple[float, int, str, int, str]:
+def ecg_window_check(
+    ecg_uv: np.ndarray, sampling_rate: float
+) -> tuple[float, int, str, int, str, np.ndarray, np.ndarray]:
     """
     Returns:
     - hr_gt: value only when valid, otherwise NaN
@@ -148,14 +153,18 @@ def ecg_window_check(ecg_uv: np.ndarray, sampling_rate: float) -> tuple[float, i
     - quality_label
     - valid_flag (0/1)
     - invalid_reason
+    - peaks: R-peak sample indices (empty array if invalid)
+    - rr_ms: RR intervals in milliseconds (empty array if invalid)
     """
-    MAX_RR_CV = 0.2
+    _empty_peaks = np.array([], dtype=np.int32)
+    _empty_rr = np.array([], dtype=np.float64)
+    MAX_RR_CV = 0.35
     if np.isnan(ecg_uv).any():
-        return np.nan, 0, "unknown", 0, "contains_nan"
+        return np.nan, 0, "unknown", 0, "contains_nan", _empty_peaks, _empty_rr
     ecg_valid = ecg_uv
 
     if len(ecg_valid) < 50:
-        return np.nan, 0, "unknown", 0, "too_short"
+        return np.nan, 0, "unknown", 0, "too_short", _empty_peaks, _empty_rr
 
     try:
         ecg_cleaned = nk.ecg_clean(ecg_valid, sampling_rate=sampling_rate, method="pantompkins1985")
@@ -167,31 +176,32 @@ def ecg_window_check(ecg_uv: np.ndarray, sampling_rate: float) -> tuple[float, i
         n_peaks = int(peaks.size)
 
         if n_peaks < MIN_BEATS:
-            return np.nan, n_peaks, quality_label, 0, "too_few_beats"
+            return np.nan, n_peaks, quality_label, 0, "too_few_beats", _empty_peaks, _empty_rr
 
         rr_sec = np.diff(peaks) / sampling_rate
+        rr_ms = rr_sec * 1000.0  # convert to milliseconds
         if rr_sec.size == 0:
-            return np.nan, n_peaks, quality_label, 0, "no_rr"
+            return np.nan, n_peaks, quality_label, 0, "no_rr", _empty_peaks, _empty_rr
 
         hr = 60.0 / float(np.median(rr_sec))
         if hr < MIN_HR or hr > MAX_HR:
-            return np.nan, n_peaks, quality_label, 0, "implausible_hr"
+            return np.nan, n_peaks, quality_label, 0, "implausible_hr", _empty_peaks, _empty_rr
 
         if np.any(rr_sec < RR_LOW_SEC) or np.any(rr_sec > RR_HIGH_SEC):
-            return np.nan, n_peaks, quality_label, 0, "implausible_rr"
+            return np.nan, n_peaks, quality_label, 0, "implausible_rr", _empty_peaks, _empty_rr
 
         rr_mean = float(np.mean(rr_sec))
         rr_std = float(np.std(rr_sec))
         rr_cv = rr_std / rr_mean if rr_mean > 0 else np.inf
         if rr_cv > MAX_RR_CV:
-            return np.nan, n_peaks, quality_label, 0, "rr_too_irregular"
+            return np.nan, n_peaks, quality_label, 0, "rr_too_irregular", _empty_peaks, _empty_rr
 
         if quality_label.lower() == "unacceptable":
-            return np.nan, n_peaks, quality_label, 0, "poor_quality"
+            return np.nan, n_peaks, quality_label, 0, "poor_quality", _empty_peaks, _empty_rr
 
-        return float(hr), n_peaks, quality_label, 1, "ok"
+        return float(hr), n_peaks, quality_label, 1, "ok", peaks, rr_ms
     except Exception:
-        return np.nan, 0, "unknown", 0, "exception"
+        return np.nan, 0, "unknown", 0, "exception", _empty_peaks, _empty_rr
 
 
 def main():
@@ -232,14 +242,18 @@ def main():
     keep_indices = []
     hr_gt_keep = []
     n_peaks_keep = []
+    peaks_keep: list[np.ndarray] = []
+    rr_ms_keep: list[np.ndarray] = []
     for i in range(n):
         valid_len = int(ecg_valid_len[i])
         ecg_seg = ecg[i, :valid_len]
-        hr, n_p, _quality_label, valid_flag, _invalid_reason = ecg_window_check(ecg_seg, ECG_FS)
+        hr, n_p, _quality_label, valid_flag, _invalid_reason, peaks_arr, rr_ms_arr = ecg_window_check(ecg_seg, ECG_FS)
         if valid_flag == 1:
             keep_indices.append(i)
             hr_gt_keep.append(hr)
             n_peaks_keep.append(n_p)
+            peaks_keep.append(peaks_arr)
+            rr_ms_keep.append(rr_ms_arr)
 
     keep_indices_arr = np.array(keep_indices, dtype=np.int32)
     kept_n = int(keep_indices_arr.size)
@@ -255,7 +269,20 @@ def main():
     ecg_keep = ecg[keep_indices_arr]
     ecg_valid_len_keep = ecg_valid_len[keep_indices_arr]
     hr_gt = np.array(hr_gt_keep, dtype=np.float64)
-    n_peaks = np.array(n_peaks_keep, dtype=np.int32)
+    n_peaks_arr = np.array(n_peaks_keep, dtype=np.int32)
+
+    # Pad R-peak indices and RR intervals to fixed length
+    r_peak_samples = np.full((kept_n, MAX_PEAKS_PER_WINDOW), -1, dtype=np.int32)
+    rr_intervals_ms = np.full((kept_n, MAX_PEAKS_PER_WINDOW - 1), np.nan, dtype=np.float64)
+    n_rr = np.zeros(kept_n, dtype=np.int32)
+    for j in range(kept_n):
+        pk = peaks_keep[j]
+        rr = rr_ms_keep[j]
+        n_pk = min(len(pk), MAX_PEAKS_PER_WINDOW)
+        n_rr_j = min(len(rr), MAX_PEAKS_PER_WINDOW - 1)
+        r_peak_samples[j, :n_pk] = pk[:n_pk]
+        rr_intervals_ms[j, :n_rr_j] = rr[:n_rr_j]
+        n_rr[j] = n_rr_j
 
     print(f"Kept windows: {kept_n}/{n} ({100*kept_n/n:.1f}%)")
     print(f"Dropped invalid windows: {dropped_n}/{n} ({100*dropped_n/n:.1f}%)")
@@ -269,7 +296,10 @@ def main():
         "ecg_valid_len": ecg_valid_len_keep,
         "ppg_fs": ppg_fs,
         "hr_gt": hr_gt,
-        "n_peaks": n_peaks,
+        "n_peaks": n_peaks_arr,
+        "r_peak_samples": r_peak_samples,
+        "rr_intervals_ms": rr_intervals_ms,
+        "n_rr": n_rr,
     }
     skip_copy = frozenset(save_kw.keys())
     for k, arr in extra_raw.items():

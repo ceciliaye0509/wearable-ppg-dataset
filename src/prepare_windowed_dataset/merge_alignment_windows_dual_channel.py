@@ -138,9 +138,9 @@ def merge_one_device(data_dir: Path, device: str) -> Path:
             if ak in ir:
                 out_data[ak] = _maybe_take_rows(ir[ak], ir_idx, n_ir)
 
-        # hr_gt / n_peaks come from ECG; IR and GREEN channel npz should agree when both ran Pan-Tompkins.
+        # hr_gt / n_peaks / R-peak data come from ECG; IR and GREEN channel npz should agree when both ran Pan-Tompkins.
         # If GREEN skipped Pan-Tompkins, only IR may carry these keys — copy from IR (or GREEN when inverted).
-        for k in ("hr_gt", "n_peaks"):
+        for k in ("hr_gt", "n_peaks", "r_peak_samples", "rr_intervals_ms", "n_rr"):
             if k in ir and k in gr:
                 ir_k = _maybe_take_rows(ir[k], ir_idx, n_ir)
                 gr_k = _maybe_take_rows(gr[k], gr_idx, n_gr)
