@@ -3,9 +3,7 @@
 PPG-based heart rate variability (HRV) for the multi-site wearable dataset, with
 optional validation against synchronized ECG. Built on **NeuroKit2**.
 
-This is an additive layer on top of the published HR-baseline code — the original
-`runner.py` and its algorithms are untouched. You only need the three files
-documented here.
+This is an additive layer on top of the published HR-baseline code.
 
 > **Note:** HRV computed from PPG peaks is technically *pulse rate variability
 > (PRV)*, an approximation of ECG-derived HRV. We call it HRV for short.
