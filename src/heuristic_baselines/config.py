@@ -27,6 +27,10 @@ REPO_ROOT = PACKAGE_ROOT.parent.parent
 HEURISTIC_HF_SUBMISSION_ROOT: Path = (
     REPO_ROOT.parent / "Multisite-PPG"
 ).resolve()
+# Sibling of the code repo: hf_upload/ (contains 5-min windowed data for HRV)
+HEURISTIC_HF_UPLOAD_ROOT: Path = (
+    REPO_ROOT.parent / "hf_upload"
+).resolve()
 
 # =============================================================================
 # Manual settings (edit here only)
@@ -34,9 +38,9 @@ HEURISTIC_HF_SUBMISSION_ROOT: Path = (
 # Which windowed tree under ``HEURISTIC_HF_SUBMISSION_ROOT`` to use.
 # "full" -> .../ppg_windowed_data/<Px>/...
 # "sample" -> .../sample_data/ppg_windowed_data/<Px>/...
-HEURISTIC_DATA_SOURCE: str = "sample"
+HEURISTIC_DATA_SOURCE: str = "5min"
 
-HEURISTIC_PIPELINE_PARTICIPANTS: list[str] = ["P7", "P8"]
+HEURISTIC_PIPELINE_PARTICIPANTS: list[str] = ["P7", "P3"]
 HEURISTIC_DEVICE_ROLES: tuple[str, ...] = ("Earring", "Ring", "Necklace", "Watch")
 
 HEURISTIC_RESULT_ROOT: Path = PACKAGE_ROOT / "outputs"
@@ -77,8 +81,10 @@ def _resolve_heuristic_windows_root() -> Path:
         return (base / "ppg_windowed_data").resolve()
     if key == "sample":
         return (base / "sample_data" / "ppg_windowed_data").resolve()
+    if key == "5min":
+        return (HEURISTIC_HF_UPLOAD_ROOT / "5min_windowed").resolve()
     raise ValueError(
-        f'HEURISTIC_DATA_SOURCE must be "full" or "sample", got {HEURISTIC_DATA_SOURCE!r}'
+        f'HEURISTIC_DATA_SOURCE must be "full", "sample", or "5min", got {HEURISTIC_DATA_SOURCE!r}'
     )
 
 
