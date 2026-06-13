@@ -5,6 +5,9 @@ src/ppg_windowed_data/
 src/sample_data/
 src/prepare_windowed_dataset/inputs/
 src/prepare_windowed_dataset/outputs/
+src/model_baselines/log/
+src/model_baselines/predictions/
+src/model_baselines/results/
 
 # Python
 __pycache__/

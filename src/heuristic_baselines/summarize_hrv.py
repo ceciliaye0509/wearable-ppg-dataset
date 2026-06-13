@@ -130,7 +130,7 @@ def print_summary_table(channel: str = "ppg_ir") -> str:
         lines.append("\n## PPG vs ECG Agreement\n")
         for metric in ["HRV_RMSSD", "HRV_SDNN"]:
             lines.append(f"\n### {metric}\n")
-            header = "| Participant | Device | r | MAE | Bias | LoA Lower | LoA Upper |"
+            header = "| Participant | Device | r | MAE | Bias | LoA Lo | LoA Hi |"
             sep = "|---|---|---|---|---|---|---|"
             lines.append(header)
             lines.append(sep)
@@ -142,7 +142,7 @@ def print_summary_table(channel: str = "ppg_ir") -> str:
                         r = rows.iloc[0]
                         lines.append(
                             f"| {pid} | {dev} | {r['r']:.4f} | {r['mae']:.2f} | "
-                            f"{r['bias']:.2f} | {r['loa_lower']:.2f} | {r['loa_upper']:.2f} |"
+                            f"{r['bias']:.2f} | {r['loa_lo']:.2f} | {r['loa_hi']:.2f} |"
                         )
 
     text = "\n".join(lines)
@@ -164,7 +164,8 @@ def plot_scatter(channel: str = "ppg_ir") -> None:
         return
 
     for metric in ["HRV_RMSSD", "HRV_SDNN"]:
-        ppg_col = f"ppg_{metric}"
+        # Remote eval: PPG columns use metric name directly, ECG uses ecg_ prefix
+        ppg_col = metric
         ecg_col = f"ecg_{metric}"
         if ppg_col not in comp_df.columns or ecg_col not in comp_df.columns:
             continue
