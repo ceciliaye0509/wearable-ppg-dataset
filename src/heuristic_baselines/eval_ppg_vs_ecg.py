@@ -39,14 +39,50 @@ RR_GRID_FS = 1000.0
 
 
 def ecg_hrv_from_rr(rr_ms: np.ndarray) -> dict[str, float]:
-    """Gold-standard HRV from an ECG RR series (ms) via NeuroKit2."""
+    """Gold-standard HRV from an ECG RR series (ms) via NeuroKit2.
+
+    Applies the same IBI processing as the PPG side for fair comparison:
+      - Physiological range gate [300, 2000] ms
+      - Step 7: 80% IBI validity ratio gate (PMC11644394)
+      - Step 2: IBI artifact correction (Lipponen & Tarvainen 2019)
+      - Time-domain override from corrected IBI (same as PPG side)
+
+    Steps 1/8 (sub-sample interpolation) are not applicable because ECG RR
+    intervals are already at ms precision — no quantization issue.
+    """
+    import os
+    baseline_mode = os.environ.get("BASELINE", "") == "1"
+
     rr = np.asarray(rr_ms, dtype=np.float64)
-    rr = rr[(rr >= hrv.IBI_MIN_MS) & (rr <= hrv.IBI_MAX_MS)]  # same physiological gate
+
+    # --- Step 7: IBI validity ratio gate (same as PPG side) ---
+    if not baseline_mode and rr.size > 0:
+        n_valid = int(((rr >= hrv.IBI_MIN_MS) & (rr <= hrv.IBI_MAX_MS)).sum())
+        valid_ratio = n_valid / len(rr)
+        if valid_ratio < 0.80:
+            return {c: float("nan") for c in COMPARE_COLS}
+
+    rr = rr[(rr >= hrv.IBI_MIN_MS) & (rr <= hrv.IBI_MAX_MS)]  # physiological gate
     if rr.size < 3:
         return {c: float("nan") for c in COMPARE_COLS}
+
+    # --- Step 2: IBI artifact correction (same as PPG side) ---
+    if not baseline_mode:
+        rr = hrv._correct_ibi_artifacts(rr, threshold=0.20)
+
     # RR(ms) -> cumulative R-peak times -> integer sample indices at 1000 Hz.
     peaks = np.rint(np.concatenate([[0.0], np.cumsum(rr)])).astype(np.int64)
     m = hrv.hrv_metrics(peaks, RR_GRID_FS, freq=True, nonlinear=True)
+
+    # Override time-domain with corrected IBI (consistent with PPG side).
+    if not baseline_mode:
+        diff = np.diff(rr)
+        m["HRV_RMSSD"] = float(np.sqrt(np.mean(diff**2))) if len(diff) > 0 else float("nan")
+        m["HRV_SDNN"] = float(np.std(rr, ddof=1)) if len(rr) > 1 else float("nan")
+        m["HRV_MeanNN"] = float(np.mean(rr))
+        if m["HRV_MeanNN"] > 0:
+            m["hr_mean"] = 60000.0 / m["HRV_MeanNN"]
+
     return {c: m.get(c, float("nan")) for c in COMPARE_COLS}
 
 
