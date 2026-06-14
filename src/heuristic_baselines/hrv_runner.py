@@ -41,23 +41,34 @@ HRV_COMPUTE_FREQ: bool = bool(getattr(config, "HRV_COMPUTE_FREQ", True))
 HRV_COMPUTE_NONLINEAR: bool = bool(getattr(config, "HRV_COMPUTE_NONLINEAR", True))
 
 
-def _load_windows(raw_npz: Path, result_dir: Path, run_preprocess: bool) -> dict:
+# Step 9: Earring skips bandpass — signal is clean, bandpass hurts precision.
+_SKIP_BANDPASS_ROLES = {"Earring"}
+
+
+def _load_windows(raw_npz: Path, result_dir: Path, run_preprocess: bool, role: str = "") -> dict:
+    import os
+    baseline_mode = os.environ.get("BASELINE", "") == "1"
+    # Step 9: skip bandpass for Earring (unless in baseline mode)
+    skip_bp = (not baseline_mode) and (role in _SKIP_BANDPASS_ROLES)
     pre_npz = result_dir / f"{raw_npz.stem}_preprocess.npz"
-    if run_preprocess:
+    if run_preprocess and not skip_bp:
         if not pre_npz.is_file():
             print(f"  [preprocess] writing {pre_npz.name} -> {result_dir}")
             write_preprocess_npz(raw_npz, pre_npz)
         load_path = pre_npz
     else:
+        if skip_bp:
+            print(f"  [Step 9] Skipping bandpass for {role} — using raw signal")
         load_path = raw_npz
     with np.load(load_path, allow_pickle=True) as z:
         return {k: np.asarray(z[k]) for k in z.files}
 
 
 def run_one_device_channel(
-    *, raw_npz: Path, result_dir: Path, device_id: str, ppg_channel: str, run_preprocess: bool
+    *, raw_npz: Path, result_dir: Path, device_id: str, ppg_channel: str,
+    run_preprocess: bool, role: str = ""
 ) -> None:
-    data = _load_windows(raw_npz, result_dir, run_preprocess)
+    data = _load_windows(raw_npz, result_dir, run_preprocess, role=role)
     t0_ms = np.asarray(data.get("t0_ms", []), dtype=np.float64)
     hr_gt = np.asarray(data.get("hr_gt", []), dtype=np.float64)
     fs = float(np.asarray(data["ppg_fs"]).item()) if "ppg_fs" in data else 100.0
@@ -133,6 +144,7 @@ def main() -> None:
                     device_id=dev_id,
                     ppg_channel=ch,
                     run_preprocess=config.HEURISTIC_RUN_PREPROCESS,
+                    role=role,
                 )
 
     print("\n[hrv] Done.")
