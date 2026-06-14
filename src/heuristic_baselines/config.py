@@ -40,7 +40,10 @@ HEURISTIC_HF_UPLOAD_ROOT: Path = (
 # "sample" -> .../sample_data/ppg_windowed_data/<Px>/...
 HEURISTIC_DATA_SOURCE: str = "5min"
 
-HEURISTIC_PIPELINE_PARTICIPANTS: list[str] = ["P7", "P3"]
+# Override via env var: PARTICIPANT=P5 python hrv_runner.py
+import os as _os
+_env_p = _os.environ.get("PARTICIPANT")
+HEURISTIC_PIPELINE_PARTICIPANTS: list[str] = [_env_p] if _env_p else ["P7"]
 HEURISTIC_DEVICE_ROLES: tuple[str, ...] = ("Earring", "Ring", "Necklace", "Watch")
 
 HEURISTIC_RESULT_ROOT: Path = PACKAGE_ROOT / "outputs"

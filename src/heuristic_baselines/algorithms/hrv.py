@@ -59,9 +59,29 @@ def hrv_columns(freq: bool = True, nonlinear: bool = True) -> list[str]:
     return cols
 
 
-# ---------------------------------------------------------------------------
-# Peak detection (NeuroKit elgendi; SciPy fallback)
-# ---------------------------------------------------------------------------
+def _consensus_peaks(
+    peaks_a: np.ndarray, peaks_b: np.ndarray, tol_samples: int = 5
+) -> np.ndarray:
+    """Keep only peaks agreed upon by two detectors within *tol_samples*.
+
+    For each peak in *peaks_a*, if *peaks_b* has a peak within ±tol
+    samples, keep the *peaks_a* position (assumed more precise).
+
+    Reference: Charlton et al. (2022) recommends multi-detector fusion
+    for improved robustness.
+    """
+    if peaks_a.size == 0:
+        return peaks_b.copy()
+    if peaks_b.size == 0:
+        return peaks_a.copy()
+    consensus = []
+    for p in peaks_a:
+        dists = np.abs(peaks_b.astype(np.int64) - int(p))
+        if dists.min() <= tol_samples:
+            consensus.append(int(p))
+    return np.array(consensus, dtype=np.int64) if consensus else peaks_a.copy()
+
+
 def detect_ppg_peaks(ppg: np.ndarray, fs: float) -> np.ndarray:
     """Return systolic peak sample indices for one PPG window."""
     x = np.asarray(ppg, dtype=np.float64)
@@ -89,6 +109,117 @@ def detect_ppg_peaks(ppg: np.ndarray, fs: float) -> np.ndarray:
     min_dist = max(1, int(round(0.273 * fs)))  # 220 bpm ceiling
     peaks, _ = find_peaks(x, distance=min_dist, prominence=0.3 * std)
     return peaks.astype(np.int64)
+
+
+def _refine_peaks_parabolic(signal: np.ndarray, peaks: np.ndarray) -> np.ndarray:
+    """Cubic (n=3) polynomial interpolation for sub-sample peak precision.
+
+    Fits a cubic polynomial through 5 neighbouring samples
+    [p-2, p-1, p, p+1, p+2] and finds the maximum analytically.
+    Falls back to quadratic (3-point) for edge peaks.
+
+    CinC2025-187 (Valencio et al.) showed n=3 outperforms n=2 for
+    PPG peak refinement on Samsung Galaxy Ring data.
+
+    Reference: Fioravanti et al. (2023); Valencio et al. (CinC 2025).
+    """
+    refined = np.empty(len(peaks), dtype=np.float64)
+    for i, p in enumerate(peaks):
+        # 5-point cubic interpolation (n=3).
+        if p >= 2 and p <= len(signal) - 3:
+            xs = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])
+            ys = np.array([
+                float(signal[p - 2]), float(signal[p - 1]),
+                float(signal[p]),
+                float(signal[p + 1]), float(signal[p + 2]),
+            ])
+            coeffs = np.polyfit(xs, ys, 3)  # [a, b, c, d] for ax³+bx²+cx+d
+            a, b, c, _d = coeffs
+            # f'(x) = 3ax² + 2bx + c = 0
+            disc = 4.0 * b * b - 12.0 * a * c
+            if abs(a) > 1e-15 and disc >= 0:
+                sqrt_disc = np.sqrt(disc)
+                x1 = (-2.0 * b + sqrt_disc) / (6.0 * a)
+                x2 = (-2.0 * b - sqrt_disc) / (6.0 * a)
+                # Pick the root closest to 0 (the original peak) that
+                # is a maximum (f''(x) = 6ax + 2b < 0).
+                candidates = []
+                for xc in [x1, x2]:
+                    if abs(xc) <= 2.0 and (6.0 * a * xc + 2.0 * b) < 0:
+                        candidates.append(xc)
+                if candidates:
+                    best = min(candidates, key=abs)
+                    refined[i] = p + best
+                    continue
+            # Cubic solve failed — fall through to quadratic.
+
+        # 3-point quadratic fallback.
+        if p <= 0 or p >= len(signal) - 1:
+            refined[i] = float(p)
+            continue
+        y0, y1, y2 = float(signal[p - 1]), float(signal[p]), float(signal[p + 1])
+        denom = y0 - 2.0 * y1 + y2
+        if abs(denom) < 1e-12:
+            refined[i] = float(p)
+        else:
+            refined[i] = p + 0.5 * (y0 - y2) / denom
+    return refined
+
+
+def _correct_ibi_artifacts(
+    ibi_ms: np.ndarray,
+    threshold: float = 0.20,
+) -> np.ndarray:
+    """Simplified Lipponen & Tarvainen (2019) IBI artifact correction.
+
+    Detects IBIs that deviate more than *threshold* (fraction) from a
+    local sliding median and replaces them with the median value.
+
+    Reference: Lipponen & Tarvainen (2019), "A robust algorithm for
+    heart rate variability time series artefact correction using novel
+    beat classification", DOI: 10.1080/03091902.2019.1640306.
+    """
+    if ibi_ms.size < 5:
+        return ibi_ms.copy()
+    from scipy.ndimage import median_filter
+
+    corrected = ibi_ms.copy()
+    med = median_filter(ibi_ms, size=11, mode="reflect")
+    outlier = np.abs(corrected - med) > threshold * med
+    corrected[outlier] = med[outlier]
+    return corrected
+
+
+def _override_time_domain_subsample(
+    out: dict[str, float],
+    peaks_float: np.ndarray,
+    fs: float,
+) -> None:
+    """Recompute RMSSD / SDNN / MeanNN from sub-sample peak positions.
+
+    NeuroKit internally uses integer peak indices (10 ms granularity at
+    100 Hz).  This function replaces those coarse estimates with values
+    derived from parabolic-interpolated float positions, after applying
+    IBI artifact correction (Lipponen & Tarvainen 2019).
+    """
+    if peaks_float.size < 3:
+        return
+    ibi = np.diff(peaks_float) / fs * 1000.0          # ms, float precision
+    nn = ibi[(ibi >= IBI_MIN_MS) & (ibi <= IBI_MAX_MS)]
+    if nn.size < 3:
+        return
+    nn = _correct_ibi_artifacts(nn)                    # <-- artifact correction
+    diff_nn = np.diff(nn)
+    mean_nn = float(np.mean(nn))
+    out["HRV_MeanNN"] = mean_nn
+    out["hr_mean"] = 60000.0 / mean_nn if mean_nn > 0 else float("nan")
+    out["HRV_SDNN"] = float(np.std(nn, ddof=1))
+    out["HRV_RMSSD"] = float(np.sqrt(np.mean(diff_nn ** 2)))
+    out["HRV_SDSD"] = float(np.std(diff_nn, ddof=1))
+    out["HRV_pNN50"] = 100.0 * float(np.mean(np.abs(diff_nn) > 50.0))
+    out["HRV_pNN20"] = 100.0 * float(np.mean(np.abs(diff_nn) > 20.0))
+    out["HRV_CVNN"] = out["HRV_SDNN"] / mean_nn if mean_nn > 0 else float("nan")
+    out["HRV_MedianNN"] = float(np.median(nn))
 
 
 # ---------------------------------------------------------------------------
@@ -163,8 +294,73 @@ def hrv_metrics(
 
 
 def hrv_from_ppg(
-    ppg: np.ndarray, fs: float, *, freq: bool = True, nonlinear: bool = True
+    ppg: np.ndarray,
+    fs: float,
+    *,
+    freq: bool = True,
+    nonlinear: bool = True,
+    sqi_threshold: float = 0.4,
+    ibi_validity_threshold: float = 0.80,
 ) -> dict[str, float]:
-    """One-window convenience wrapper: PPG -> curated HRV dict."""
-    peaks = detect_ppg_peaks(ppg, fs)
-    return hrv_metrics(peaks, fs, freq=freq, nonlinear=nonlinear)
+    """One-window convenience wrapper: PPG -> curated HRV dict.
+
+    Pipeline:
+      1. Peak detection (NeuroKit elgendi).
+      2. IBI validity ratio gate — if fewer than *ibi_validity_threshold*
+         of detected IBIs fall within [300, 2000] ms, the window is
+         marked unreliable (all HRV metrics set to NaN).
+         Reference: PMC11644394, Sensors 2024 — recommends ~80%.
+      3. Signal Quality Assessment (SQA) — secondary gate.
+      4. NeuroKit HRV (integer peaks) for freq / nonlinear.
+      5. Sub-sample parabolic interpolation + IBI artifact correction
+         to override time-domain metrics with higher precision values.
+
+    Set env BASELINE=1 to skip all improvements (steps 2-5) for
+    comparison against the optimized pipeline.
+    """
+    import os
+    baseline_mode = os.environ.get("BASELINE", "") == "1"
+
+    from .sqa import ppg_sqi
+
+    ppg_clean = np.asarray(ppg, dtype=np.float64)
+    ppg_clean = ppg_clean[~np.isnan(ppg_clean)]
+    peaks = detect_ppg_peaks(ppg_clean, fs)
+
+    # --- Baseline mode: skip all improvements ---
+    if baseline_mode:
+        out = hrv_metrics(peaks, fs, freq=freq, nonlinear=nonlinear)
+        out["sqi"] = 0.0
+        out["valid_ibi_ratio"] = 0.0
+        return out
+
+    # --- IBI validity ratio gate (PMC11644394) ---
+    valid_ibi_ratio = 0.0
+    if peaks.size >= 2:
+        ibi_raw = np.diff(peaks) / fs * 1000.0
+        n_valid = int(((ibi_raw >= IBI_MIN_MS) & (ibi_raw <= IBI_MAX_MS)).sum())
+        valid_ibi_ratio = n_valid / len(ibi_raw)
+    if valid_ibi_ratio < ibi_validity_threshold:
+        out = _nan_metrics(freq, nonlinear)
+        out["sqi"] = 0.0
+        out["valid_ibi_ratio"] = valid_ibi_ratio
+        return out
+
+    # --- Signal quality gate ---
+    sqi = ppg_sqi(ppg_clean, fs, peaks)
+    if sqi < sqi_threshold:
+        out = _nan_metrics(freq, nonlinear)
+        out["sqi"] = sqi
+        out["valid_ibi_ratio"] = valid_ibi_ratio
+        return out
+
+    out = hrv_metrics(peaks, fs, freq=freq, nonlinear=nonlinear)
+    out["sqi"] = sqi
+    out["valid_ibi_ratio"] = valid_ibi_ratio
+
+    # Sub-sample refinement for time-domain metrics.
+    if peaks.size >= 3 and ppg_clean.size > 0:
+        peaks_f = _refine_peaks_parabolic(ppg_clean, peaks)
+        _override_time_domain_subsample(out, peaks_f, fs)
+
+    return out
