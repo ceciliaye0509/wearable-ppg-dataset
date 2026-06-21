@@ -72,7 +72,12 @@ def main() -> None:
         print("\n" + "#" * 64 + "\n# STEP 2/2: PPG vs ECG comparison (eval_ppg_vs_ecg)\n" + "#" * 64)
         try:
             import eval_ppg_vs_ecg
-            eval_ppg_vs_ecg.main()
+            old_argv = sys.argv[:]
+            try:
+                sys.argv = [sys.argv[0]]
+                eval_ppg_vs_ecg.main()
+            finally:
+                sys.argv = old_argv
         except FileNotFoundError as e:
             print(f"[run_all] eval skipped: {e}")
         except ImportError:

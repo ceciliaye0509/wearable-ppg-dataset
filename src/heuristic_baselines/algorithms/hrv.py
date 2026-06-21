@@ -38,6 +38,13 @@ from scipy.signal import find_peaks  # noqa: E402
 IBI_MIN_MS = 300.0
 IBI_MAX_MS = 2000.0
 
+# Physiological RMSSD upper bound for PPG — values above this indicate
+# false peak detection (motion artifacts producing inflated IBI variability).
+RMSSD_MAX_MS = 200.0
+# IBI coefficient-of-variation upper bound: normal sinus rhythm at rest
+# rarely exceeds 0.15; 0.20 is a generous limit for ambulatory recordings.
+IBI_CV_MAX = 0.20
+
 # Curated, reportable subset of NeuroKit HRV columns (native HRV_* names).
 TIME_COLS: tuple[str, ...] = (
     "HRV_MeanNN", "HRV_SDNN", "HRV_RMSSD", "HRV_SDSD",
@@ -57,6 +64,15 @@ def hrv_columns(freq: bool = True, nonlinear: bool = True) -> list[str]:
     if nonlinear:
         cols += list(NONLINEAR_COLS)
     return cols
+
+
+QC_COLS: tuple[str, ...] = (
+    "sqi",
+    "valid_ibi_ratio",
+    "ibi_cv",
+    "ibi_correction_ratio",
+    "ppg_qc_reason",
+)
 
 
 def _consensus_peaks(
@@ -190,6 +206,22 @@ def _correct_ibi_artifacts(
     return corrected
 
 
+def _correct_ibi_artifacts_with_ratio(
+    ibi_ms: np.ndarray,
+    threshold: float = 0.20,
+) -> tuple[np.ndarray, float]:
+    """Return corrected IBI values plus the fraction replaced."""
+    if ibi_ms.size < 5:
+        return ibi_ms.copy(), 0.0
+    from scipy.ndimage import median_filter
+
+    corrected = ibi_ms.copy()
+    med = median_filter(ibi_ms, size=11, mode="reflect")
+    outlier = np.abs(corrected - med) > threshold * med
+    corrected[outlier] = med[outlier]
+    return corrected, float(np.mean(outlier))
+
+
 def _override_time_domain_subsample(
     out: dict[str, float],
     peaks_float: np.ndarray,
@@ -208,18 +240,27 @@ def _override_time_domain_subsample(
     nn = ibi[(ibi >= IBI_MIN_MS) & (ibi <= IBI_MAX_MS)]
     if nn.size < 3:
         return
-    nn = _correct_ibi_artifacts(nn)                    # <-- artifact correction
+    nn, corr_ratio = _correct_ibi_artifacts_with_ratio(nn)
     diff_nn = np.diff(nn)
     mean_nn = float(np.mean(nn))
+    sdnn = float(np.std(nn, ddof=1))
+    rmssd = float(np.sqrt(np.mean(diff_nn ** 2)))
     out["HRV_MeanNN"] = mean_nn
     out["hr_mean"] = 60000.0 / mean_nn if mean_nn > 0 else float("nan")
-    out["HRV_SDNN"] = float(np.std(nn, ddof=1))
-    out["HRV_RMSSD"] = float(np.sqrt(np.mean(diff_nn ** 2)))
+    out["HRV_SDNN"] = sdnn
+    out["HRV_RMSSD"] = rmssd
     out["HRV_SDSD"] = float(np.std(diff_nn, ddof=1))
     out["HRV_pNN50"] = 100.0 * float(np.mean(np.abs(diff_nn) > 50.0))
     out["HRV_pNN20"] = 100.0 * float(np.mean(np.abs(diff_nn) > 20.0))
-    out["HRV_CVNN"] = out["HRV_SDNN"] / mean_nn if mean_nn > 0 else float("nan")
+    out["HRV_CVNN"] = sdnn / mean_nn if mean_nn > 0 else float("nan")
     out["HRV_MedianNN"] = float(np.median(nn))
+    # Override SD1/SD2 using Poincaré identities from corrected IBI so that
+    # quantization error from integer peak positions does not propagate.
+    sd1 = rmssd / (2.0 ** 0.5)
+    sd2_sq = max(0.0, 2.0 * sdnn ** 2 - sd1 ** 2)
+    out["HRV_SD1"] = sd1
+    out["HRV_SD2"] = sd2_sq ** 0.5
+    out["ibi_correction_ratio"] = corr_ratio
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +342,8 @@ def hrv_from_ppg(
     nonlinear: bool = True,
     sqi_threshold: float = 0.4,
     ibi_validity_threshold: float = 0.80,
+    ibi_cv_threshold: float = IBI_CV_MAX,
+    rmssd_max_ms: float = RMSSD_MAX_MS,
 ) -> dict[str, float]:
     """One-window convenience wrapper: PPG -> curated HRV dict.
 
@@ -332,18 +375,39 @@ def hrv_from_ppg(
         out = hrv_metrics(peaks, fs, freq=freq, nonlinear=nonlinear)
         out["sqi"] = 0.0
         out["valid_ibi_ratio"] = 0.0
+        out["ibi_cv"] = float("nan")
+        out["ibi_correction_ratio"] = 0.0
+        out["ppg_qc_reason"] = "baseline_mode"
         return out
 
     # --- IBI validity ratio gate (PMC11644394) ---
     valid_ibi_ratio = 0.0
+    ibi_cv = float("nan")
     if peaks.size >= 2:
         ibi_raw = np.diff(peaks) / fs * 1000.0
-        n_valid = int(((ibi_raw >= IBI_MIN_MS) & (ibi_raw <= IBI_MAX_MS)).sum())
+        nn_raw = ibi_raw[(ibi_raw >= IBI_MIN_MS) & (ibi_raw <= IBI_MAX_MS)]
+        n_valid = int(len(nn_raw))
         valid_ibi_ratio = n_valid / len(ibi_raw)
+        if nn_raw.size >= 2:
+            mean_nn = float(np.mean(nn_raw))
+            ibi_cv = float(np.std(nn_raw, ddof=1) / mean_nn) if mean_nn > 0 else float("nan")
     if valid_ibi_ratio < ibi_validity_threshold:
         out = _nan_metrics(freq, nonlinear)
         out["sqi"] = 0.0
         out["valid_ibi_ratio"] = valid_ibi_ratio
+        out["ibi_cv"] = ibi_cv
+        out["ibi_correction_ratio"] = float("nan")
+        out["ppg_qc_reason"] = "low_valid_ibi_ratio"
+        return out
+
+    # --- IBI CV gate: high CV indicates motion-induced false peaks ---
+    if np.isfinite(ibi_cv) and ibi_cv > ibi_cv_threshold:
+        out = _nan_metrics(freq, nonlinear)
+        out["sqi"] = 0.0
+        out["valid_ibi_ratio"] = valid_ibi_ratio
+        out["ibi_cv"] = ibi_cv
+        out["ibi_correction_ratio"] = float("nan")
+        out["ppg_qc_reason"] = "high_ibi_cv"
         return out
 
     # --- Signal quality gate ---
@@ -352,15 +416,30 @@ def hrv_from_ppg(
         out = _nan_metrics(freq, nonlinear)
         out["sqi"] = sqi
         out["valid_ibi_ratio"] = valid_ibi_ratio
+        out["ibi_cv"] = ibi_cv
+        out["ibi_correction_ratio"] = float("nan")
+        out["ppg_qc_reason"] = "low_sqi"
         return out
 
     out = hrv_metrics(peaks, fs, freq=freq, nonlinear=nonlinear)
     out["sqi"] = sqi
     out["valid_ibi_ratio"] = valid_ibi_ratio
+    out["ibi_cv"] = ibi_cv
+    out["ibi_correction_ratio"] = 0.0
+    out["ppg_qc_reason"] = "ok"
 
     # Sub-sample refinement for time-domain metrics.
     if peaks.size >= 3 and ppg_clean.size > 0:
         peaks_f = _refine_peaks_parabolic(ppg_clean, peaks)
         _override_time_domain_subsample(out, peaks_f, fs)
+
+    # --- RMSSD upper bound: values above threshold indicate false-peak inflation ---
+    if np.isfinite(out.get("HRV_RMSSD", float("nan"))) and out["HRV_RMSSD"] > rmssd_max_ms:
+        for k in _nan_metrics(freq, nonlinear):
+            out[k] = float("nan")
+        out["sqi"] = sqi
+        out["valid_ibi_ratio"] = valid_ibi_ratio
+        out["ibi_cv"] = ibi_cv
+        out["ppg_qc_reason"] = "high_rmssd"
 
     return out

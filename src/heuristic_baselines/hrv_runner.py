@@ -39,10 +39,63 @@ from preprocess import write_preprocess_npz  # noqa: E402
 
 HRV_COMPUTE_FREQ: bool = bool(getattr(config, "HRV_COMPUTE_FREQ", True))
 HRV_COMPUTE_NONLINEAR: bool = bool(getattr(config, "HRV_COMPUTE_NONLINEAR", True))
+MOTION_QC_ENABLED: bool = bool(getattr(config, "MOTION_QC_ENABLED", True))
+MOTION_SEG_SEC: float = float(getattr(config, "MOTION_SEG_SEC", 10.0))
+MOTION_PERCENTILE: float = float(getattr(config, "MOTION_PERCENTILE", 75.0))
+MOTION_MAX_FRACTION: float = float(getattr(config, "MOTION_MAX_FRACTION", 0.50))
 
 
 # Step 9: Earring skips bandpass — signal is clean, bandpass hurts precision.
 _SKIP_BANDPASS_ROLES = {"Earring"}
+
+
+def _motion_fraction_per_window(
+    data: dict,
+    *,
+    seg_sec: float = MOTION_SEG_SEC,
+    percentile: float = MOTION_PERCENTILE,
+) -> tuple[np.ndarray, float]:
+    """Per-window fraction of high-motion 10s chunks from accelerometer."""
+    if not all(k in data for k in ("accel_x", "accel_y", "accel_z")):
+        n = len(np.asarray(data.get("t0_ms", [])))
+        return np.full(n, np.nan), float("nan")
+
+    ax = np.asarray(data["accel_x"], dtype=np.float64)
+    ay = np.asarray(data["accel_y"], dtype=np.float64)
+    az = np.asarray(data["accel_z"], dtype=np.float64)
+    fs = float(np.asarray(data["ppg_fs"]).item()) if "ppg_fs" in data else 100.0
+    seg_n = max(1, int(round(seg_sec * fs)))
+
+    all_stds: list[float] = []
+    per_win: list[np.ndarray] = []
+    for i in range(ax.shape[0]):
+        mag = np.sqrt(ax[i] ** 2 + ay[i] ** 2 + az[i] ** 2)
+        n_segs = len(mag) // seg_n
+        if n_segs == 0:
+            stds = np.array([float(np.std(mag))])
+        else:
+            stds = np.array([
+                float(np.std(mag[j * seg_n:(j + 1) * seg_n]))
+                for j in range(n_segs)
+            ])
+        per_win.append(stds)
+        all_stds.extend(stds.tolist())
+
+    if not all_stds:
+        return np.zeros(ax.shape[0]), float("nan")
+
+    threshold = float(np.percentile(all_stds, percentile))
+    fractions = np.array([float(np.mean(stds > threshold)) for stds in per_win])
+    return fractions, threshold
+
+
+def _invalidate_hrv_metrics(row: dict, *, reason: str) -> None:
+    """Mark HRV unavailable while preserving QC diagnostics."""
+    for col in hrv.hrv_columns(HRV_COMPUTE_FREQ, HRV_COMPUTE_NONLINEAR):
+        if col != "n_peaks":
+            row[col] = float("nan")
+    existing = str(row.get("ppg_qc_reason", "ok"))
+    row["ppg_qc_reason"] = reason if existing == "ok" else f"{existing};{reason}"
 
 
 def _load_windows(raw_npz: Path, result_dir: Path, run_preprocess: bool, role: str = "") -> dict:
@@ -75,6 +128,7 @@ def run_one_device_channel(
     ppg = np.asarray(ppg_from_npz(data, ppg_channel), dtype=np.float64)
     n = int(ppg.shape[0])
     result_dir.mkdir(parents=True, exist_ok=True)
+    motion_fraction, motion_threshold = _motion_fraction_per_window(data)
 
     rows = []
     for i in range(n):
@@ -85,12 +139,24 @@ def run_one_device_channel(
         if i < len(hr_gt):
             row["hr_gt"] = float(hr_gt[i])
         row.update(m)
+        mf = float(motion_fraction[i]) if i < len(motion_fraction) else float("nan")
+        row["motion_fraction"] = mf
+        row["motion_threshold"] = motion_threshold
+        row["motion_gate"] = bool(
+            MOTION_QC_ENABLED
+            and np.isfinite(mf)
+            and mf >= MOTION_MAX_FRACTION
+        )
+        if row["motion_gate"]:
+            _invalidate_hrv_metrics(row, reason="motion_artifact")
         rows.append(row)
 
     cols = ["t0_ms"]
     if len(hr_gt):
         cols.append("hr_gt")
     cols += hrv.hrv_columns(HRV_COMPUTE_FREQ, HRV_COMPUTE_NONLINEAR)
+    cols += list(hrv.QC_COLS)
+    cols += ["motion_fraction", "motion_threshold", "motion_gate"]
     df = pd.DataFrame(rows, columns=cols)
 
     out_path = result_dir / f"hrv_{device_id}_{ppg_channel}.csv"

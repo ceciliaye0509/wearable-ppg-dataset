@@ -72,9 +72,27 @@ KNOWN_HEURISTIC_ALGORITHMS: frozenset[str] = frozenset(
 HRV_WINDOW_SEC: float = 300.0
 # Compute frequency-domain (LF/HF/LFn/HFn/TP). Valid at >=2-5 min; turn OFF if
 # you ever run this on short (<60 s) windows.
-HRV_COMPUTE_FREQ: bool = True
+def _env_bool(name: str, default: bool) -> bool:
+    raw = _os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+HRV_COMPUTE_FREQ: bool = _env_bool("HRV_COMPUTE_FREQ", True)
 # Compute nonlinear Poincaré indices (SD1/SD2/SD1SD2).
-HRV_COMPUTE_NONLINEAR: bool = True
+HRV_COMPUTE_NONLINEAR: bool = _env_bool("HRV_COMPUTE_NONLINEAR", True)
+
+# =============================================================================
+# PPG motion-artifact QC (used by hrv_runner.py)
+# =============================================================================
+# Split each 5-min window into 10s accelerometer chunks. A chunk is high-motion
+# if its acceleration-magnitude std exceeds the participant/device p75.
+# A PPG HRV window is invalidated when at least half of its chunks are high-motion.
+MOTION_QC_ENABLED: bool = True
+MOTION_SEG_SEC: float = 10.0
+MOTION_PERCENTILE: float = 75.0
+MOTION_MAX_FRACTION: float = 0.50
 
 
 def _resolve_heuristic_windows_root() -> Path:
