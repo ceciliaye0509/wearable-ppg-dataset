@@ -17,3 +17,9 @@ __pycache__/
 .env/
 src/heuristic_baselines/bench_p7.py
 src/heuristic_baselines/experiments.py
+# One-off experiment/analysis scripts (keep local only)
+src/heuristic_baselines/full_step_matrix.py
+src/heuristic_baselines/aligned_eval.py
+src/heuristic_baselines/recompute_steps_v2.py
+src/heuristic_baselines/motion_window_sweep.py
+src/heuristic_baselines/generate_scatter_plots.py
