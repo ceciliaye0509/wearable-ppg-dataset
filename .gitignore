@@ -23,3 +23,5 @@ src/heuristic_baselines/aligned_eval.py
 src/heuristic_baselines/recompute_steps_v2.py
 src/heuristic_baselines/motion_window_sweep.py
 src/heuristic_baselines/generate_scatter_plots.py
+src/heuristic_baselines/bench_participant.py
+src/heuristic_baselines/step3_sqi_sweep.py
