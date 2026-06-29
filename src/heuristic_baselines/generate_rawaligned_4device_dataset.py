@@ -1,3 +1,15 @@
+# ===========================================================================
+# ★ 模块说明（重点）
+# ===========================================================================
+# 本脚本用于生成「基于原始时间线对齐」的四设备 PPG 数据集，以 ECG R-peak 为标签。
+# 与早期基于 5 分钟窗口的 v2 生成器不同，本版本的核心流程为：
+#   1. 从原始 PPG/ECG 时间序列出发；
+#   2. 在共享的绝对时间网格上切分窗口；
+#   3. 将四个 PPG 设备的两个通道统一重采样到 50 Hz；
+#   4. 仅凭 PPG 采样覆盖率和 ECG 标签质控来决定窗口保留与否；
+#   5. PPG SQI、运动指标、PPG 波峰及 PPG-HRV 仅作为元数据；
+#   6. ECG R-peak 位置数组作为主要标签。
+# ===========================================================================
 """
 Generate raw-timeline aligned 4-device PPG dataset with ECG R-peak labels.
 
@@ -18,6 +30,9 @@ Run with the project venv so SciPy and NeuroKit2 are available, e.g.
       --dataset-name synced_4device_rawaligned_strict_reference \
       --stride-sec 300
 """
+# ---------------------------------------------------------------------------
+# 标准库与第三方库导入
+# ---------------------------------------------------------------------------
 from __future__ import annotations
 
 import argparse
@@ -29,51 +44,73 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# ---------------------------------------------------------------------------
+# 项目内部模块导入
+# 将当前脚本所在目录加入 sys.path，以便直接 import 同级模块
+# ---------------------------------------------------------------------------
 _PKG_ROOT = Path(__file__).resolve().parent
 if str(_PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(_PKG_ROOT))
 
-import config  # noqa: E402
-from algorithms import hrv  # noqa: E402
+import config  # noqa: E402  # 项目级配置（路径、常量等）
+from algorithms import hrv  # noqa: E402  # HRV 相关算法（IBI 校正、RMSSD 等）
 from generate_synced_4device_dataset import (  # noqa: E402
-    CHANNELS,
-    DEFAULT_MAX_IBI_CORRECTION_RATIO,
-    DEFAULT_MAX_MOTION_FRACTION,
-    DEFAULT_MAX_PPG_IBI_CORRECTION_RATIO,
-    DEFAULT_MAX_RMSSD_MS,
-    DEFAULT_MIN_PPG_SQI,
-    DEVICES,
-    _ppg_channel_qc,
-    _ppg_peaks_and_qc,
-    _preprocess_for_peaks,
-    _resample_to_grid,
-    _simple_ecg_qrs_sqi,
+    CHANNELS,                              # PPG 通道列表（如 green、infrared）
+    DEFAULT_MAX_IBI_CORRECTION_RATIO,      # IBI 校正比例上限
+    DEFAULT_MAX_MOTION_FRACTION,           # 运动占比上限
+    DEFAULT_MAX_PPG_IBI_CORRECTION_RATIO,  # PPG IBI 校正比例上限
+    DEFAULT_MAX_RMSSD_MS,                  # RMSSD 上限（ms）
+    DEFAULT_MIN_PPG_SQI,                   # PPG 信号质量指数下限
+    DEVICES,                               # 四个 PPG 设备名称列表
+    _ppg_channel_qc,                       # 单通道 PPG 质控函数
+    _ppg_peaks_and_qc,                     # PPG 波峰检测与质控
+    _preprocess_for_peaks,                 # PPG 预处理（带通滤波等）
+    _resample_to_grid,                     # 将原始 PPG 重采样到统一时间网格
+    _simple_ecg_qrs_sqi,                   # ECG QRS 简单信号质量指数
 )
-from io_utils import normalize_participant_id  # noqa: E402
+from io_utils import normalize_participant_id  # noqa: E402  # 统一参与者 ID 格式
 
+# ---------------------------------------------------------------------------
+# NeuroKit2 导入检查
+# neurokit2 用于 ECG 信号清洗和 R-peak 检测，若未安装则直接退出
+# ---------------------------------------------------------------------------
 try:
     import neurokit2 as nk
 except ImportError as exc:  # pragma: no cover
     raise SystemExit("neurokit2 is required. Run with /Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python") from exc
 
+# ---------------------------------------------------------------------------
+# 全局常量
+# ---------------------------------------------------------------------------
+RAW_ROOT = config.HEURISTIC_HF_SUBMISSION_ROOT / "raw_data"  # 原始数据根目录
+MAX_PEAKS_PER_WINDOW = 1200  # 每个窗口允许的最大 R-peak 数量（安全上限）
 
-RAW_ROOT = config.HEURISTIC_HF_SUBMISSION_ROOT / "raw_data"
-MAX_PEAKS_PER_WINDOW = 1200
 
-
+# ---------------------------------------------------------------------------
+# 辅助函数：获取参与者 ID 列表
+# 若命令行指定了参与者，则按逗号分割；否则从原始数据目录自动扫描
+# ---------------------------------------------------------------------------
 def _participant_ids(raw_root: Path, raw: str | None) -> list[str]:
     if raw:
         return [normalize_participant_id(p) for p in raw.split(",") if p.strip()]
     return sorted((p.name for p in raw_root.iterdir() if p.is_dir()), key=lambda x: int(x[1:]))
 
 
+# ---------------------------------------------------------------------------
+# 辅助函数：构建原始数据文件路径
+# 路径格式: raw_root / P{id} / P{id}_{device}_raw.npz
+# ---------------------------------------------------------------------------
 def _raw_path(raw_root: Path, pid: str, name: str) -> Path:
     return raw_root / pid / f"{pid}_{name}_raw.npz"
 
 
-def _load_ppg_raw(raw_root: Path, pid: str) -> dict[str, dict[str, np.ndarray]]:
+# ---------------------------------------------------------------------------
+# 辅助函数：加载指定参与者的所有设备的原始 PPG 数据
+# 返回嵌套字典：{设备名: {字段名: ndarray}}
+# ---------------------------------------------------------------------------
+def _load_ppg_raw(raw_root: Path, pid: str, devices: list[str]) -> dict[str, dict[str, np.ndarray]]:
     out: dict[str, dict[str, np.ndarray]] = {}
-    for dev in DEVICES:
+    for dev in devices:
         path = _raw_path(raw_root, pid, dev)
         if not path.is_file():
             raise FileNotFoundError(path)
@@ -82,6 +119,9 @@ def _load_ppg_raw(raw_root: Path, pid: str) -> dict[str, dict[str, np.ndarray]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# 辅助函数：加载指定参与者的原始 ECG 数据（Polar 设备）
+# ---------------------------------------------------------------------------
 def _load_ecg_raw(raw_root: Path, pid: str) -> dict[str, np.ndarray]:
     path = raw_root / pid / f"{pid}_polar_ecg_raw.npz"
     if not path.is_file():
@@ -90,56 +130,82 @@ def _load_ecg_raw(raw_root: Path, pid: str) -> dict[str, np.ndarray]:
         return {k: np.asarray(z[k]) for k in z.files}
 
 
+# ---------------------------------------------------------------------------
+# 辅助函数：从时间戳序列（毫秒）推断采样率 (Hz)
+# 计算相邻有效时间戳的中位间隔，然后转换为频率
+# ---------------------------------------------------------------------------
 def _infer_fs_ms(t_ms: np.ndarray) -> float:
     t = np.asarray(t_ms, dtype=np.float64)
-    dt = np.diff(t[np.isfinite(t)])
-    dt = dt[(dt > 0) & np.isfinite(dt)]
+    dt = np.diff(t[np.isfinite(t)])       # 相邻时间差
+    dt = dt[(dt > 0) & np.isfinite(dt)]   # 过滤无效差值
     if dt.size == 0:
         return float("nan")
-    return float(1000.0 / np.median(dt))
+    return float(1000.0 / np.median(dt))   # 中位间隔 -> 采样率
 
 
+# ---------------------------------------------------------------------------
+# 辅助函数：创建指定形状的空 object 数组
+# 每个元素初始化为空的 float32 数组，用于存储变长的波峰信息
+# ---------------------------------------------------------------------------
 def _empty_object_array(shape: tuple[int, ...]) -> np.ndarray:
     arr = np.empty(shape, dtype=object)
     arr.fill(np.array([], dtype=np.float32))
     return arr
 
 
+# ---------------------------------------------------------------------------
+# ★ 辅助函数：计算窗口边界偏移量（重点）
+# 给定一段时间戳和窗口 [t0, t1]，计算该设备在窗口起止处的偏移距离。
+# 返回 (起始偏移_ms, 结束偏移_ms, 落入窗口的样本数)。
+# 这些偏移会与 alignment_tolerance 比较，判断该设备是否在此窗口有效对齐。
+# ---------------------------------------------------------------------------
 def _boundary_offsets_ms(times_ms: np.ndarray, t0: float, t1: float) -> tuple[float, float, int]:
     t = np.asarray(times_ms, dtype=np.float64)
-    lo = int(np.searchsorted(t, t0, side="left"))
-    hi = int(np.searchsorted(t, t1, side="right"))
+    lo = int(np.searchsorted(t, t0, side="left"))     # 窗口起点左侧第一个样本
+    hi = int(np.searchsorted(t, t1, side="right"))     # 窗口终点右侧第一个样本
     if hi <= lo:
-        return float("inf"), float("inf"), 0
+        return float("inf"), float("inf"), 0           # 窗口内无样本
     first = float(t[lo])
     last = float(t[hi - 1])
-    return first - t0, t1 - last, hi - lo
+    return first - t0, t1 - last, hi - lo              # 起始偏移、结束偏移、样本计数
 
 
+# ===========================================================================
+# ★★ 核心函数：生成候选窗口列表（重点）
+# ===========================================================================
+# 找到所有 PPG 设备和 ECG 的公共时间重叠区间，然后按照 stride 在该区间上
+# 生成等间距的窗口起止时间。这是整个数据集切分的基础。
+# ---------------------------------------------------------------------------
 def _candidate_windows(
     ppg_raw: dict[str, dict[str, np.ndarray]],
     ecg_raw: dict[str, np.ndarray],
     *,
+    devices: list[str],
     window_sec: int,
     stride_sec: int,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
-    starts = [float(ppg_raw[d]["timestamp"][0]) for d in DEVICES]
-    ends = [float(ppg_raw[d]["timestamp"][-1]) for d in DEVICES]
+    # 收集所有设备 + ECG 的起止时间
+    starts = [float(ppg_raw[d]["timestamp"][0]) for d in devices]
+    ends = [float(ppg_raw[d]["timestamp"][-1]) for d in devices]
     starts.append(float(ecg_raw["time_ms"][0]))
     ends.append(float(ecg_raw["time_ms"][-1]))
+    # 取各设备起始时间的最大值、结束时间的最小值 -> 公共重叠区间
     common_start = max(starts)
     common_end = min(ends)
     window_ms = window_sec * 1000.0
     stride_ms = stride_sec * 1000.0
+    # 第一个窗口起点：对齐到 stride 的整数倍（向上取整）
     first_t0 = math.ceil(common_start / stride_ms) * stride_ms
-    last_t0 = common_end - window_ms
+    last_t0 = common_end - window_ms  # 最后一个完整窗口的起点
     if last_t0 < first_t0:
+        # 公共区间不足以容纳一个完整窗口
         empty = np.array([], dtype=np.float64)
         return empty, empty, {
             "common_start_ms": common_start,
             "common_end_ms": common_end,
             "common_duration_sec": max(0.0, (common_end - common_start) / 1000.0),
         }
+    # 生成所有候选窗口的起止时间数组
     t0 = np.arange(first_t0, last_t0 + 0.5 * stride_ms, stride_ms, dtype=np.float64)
     t1 = t0 + window_ms
     return t0, t1, {
@@ -149,11 +215,23 @@ def _candidate_windows(
     }
 
 
+# ---------------------------------------------------------------------------
+# 辅助函数：从原始 ECG 数据推断采样率
+# ---------------------------------------------------------------------------
 def _ecg_fs_from_raw(ecg_raw: dict[str, np.ndarray]) -> float:
     t_ms = np.asarray(ecg_raw["time_ms"], dtype=np.float64)
     return _infer_fs_ms(t_ms)
 
 
+# ===========================================================================
+# ★★★ 核心函数：单窗口 ECG 标签生成与质控（最重点）
+# ===========================================================================
+# 对给定窗口 [t0, t1] 提取 ECG 片段，执行以下步骤：
+#   1. 用 NeuroKit2 Pan-Tompkins 算法检测 R-peak
+#   2. 计算 RR 间期、校正 IBI、RMSSD、SDNN、HR 等 HRV 指标
+#   3. 综合多项质控条件判断该窗口的 ECG 标签是否可信
+# 此函数的输出直接决定窗口是否被保留——是整个数据集生成的核心。
+# ---------------------------------------------------------------------------
 def _ecg_label_for_window(
     ecg_raw: dict[str, np.ndarray],
     ecg_fs: float,
@@ -170,40 +248,45 @@ def _ecg_label_for_window(
     window_ms = t1 - t0
     ecg = np.asarray(ecg_raw["ecg_uv"], dtype=np.float64)
     raw_t = np.asarray(ecg_raw["time_ms"], dtype=np.float64)
+    # 用二分搜索定位窗口在原始 ECG 中的索引范围
     lo = int(np.searchsorted(raw_t, t0, side="left"))
     hi = int(np.searchsorted(raw_t, t1, side="right"))
-    seg = ecg[lo:hi]
-    expected_n = max(1, int(round((window_ms / 1000.0) * ecg_fs)))
-    valid_ratio = float(np.isfinite(seg).sum() / expected_n) if seg.size else 0.0
+    seg = ecg[lo:hi]  # 截取窗口内的 ECG 信号片段
+    expected_n = max(1, int(round((window_ms / 1000.0) * ecg_fs)))  # 理论应有的样本数
+    valid_ratio = float(np.isfinite(seg).sum() / expected_n) if seg.size else 0.0  # 有效样本覆盖率
 
+    # ★ R-peak 检测：使用 NeuroKit2 Pan-Tompkins 算法
     peak_times = np.array([], dtype=np.float64)
     local_peak_idx = np.array([], dtype=np.int64)
     clean = np.array([], dtype=np.float64)
     if seg.size >= 50 and np.isfinite(ecg_fs) and ecg_fs > 0 and np.isfinite(seg).all():
         try:
-            clean = nk.ecg_clean(seg, sampling_rate=ecg_fs, method="pantompkins1985")
-            _, info = nk.ecg_peaks(clean, sampling_rate=ecg_fs, method="pantompkins1985")
+            clean = nk.ecg_clean(seg, sampling_rate=ecg_fs, method="pantompkins1985")  # ECG 信号清洗
+            _, info = nk.ecg_peaks(clean, sampling_rate=ecg_fs, method="pantompkins1985")  # R-peak 检测
             local_peak_idx = np.asarray(info.get("ECG_R_Peaks", []), dtype=np.int64).ravel()
-            local_peak_idx = local_peak_idx[(local_peak_idx >= 0) & (local_peak_idx < seg.size)]
+            local_peak_idx = local_peak_idx[(local_peak_idx >= 0) & (local_peak_idx < seg.size)]  # 过滤越界索引
             if local_peak_idx.size:
-                peak_times = raw_t[lo + local_peak_idx]
+                peak_times = raw_t[lo + local_peak_idx]  # 转换为绝对时间戳
         except Exception:
             peak_times = np.array([], dtype=np.float64)
             local_peak_idx = np.array([], dtype=np.int64)
 
-    rel_ms = peak_times - t0
-    peak_count = int(rel_ms.size)
+    # ★ HRV 指标计算
+    rel_ms = peak_times - t0                         # R-peak 相对于窗口起点的时间（ms）
+    peak_count = int(rel_ms.size)                     # R-peak 计数
+    # 计算 RR 间期（相邻 R-peak 时间差）
     rr = np.diff(peak_times).astype(np.float64) if peak_times.size >= 2 else np.array([], dtype=np.float64)
-    valid_rr = (rr >= hrv.IBI_MIN_MS) & (rr <= hrv.IBI_MAX_MS)
-    valid_ibi_ratio = float(valid_rr.mean()) if rr.size else 0.0
-    nn = rr[valid_rr]
+    valid_rr = (rr >= hrv.IBI_MIN_MS) & (rr <= hrv.IBI_MAX_MS)  # 在生理合理范围内的 RR 间期
+    valid_ibi_ratio = float(valid_rr.mean()) if rr.size else 0.0  # 有效 IBI 比例
+    nn = rr[valid_rr]  # 仅保留有效的 RR 间期（NN 间期）
     if nn.size >= 3:
+        # 校正 IBI 伪影（异常间期修正）
         corrected, corr_ratio = hrv._correct_ibi_artifacts_with_ratio(nn)
         diff = np.diff(corrected)
-        rmssd = float(np.sqrt(np.mean(diff ** 2))) if diff.size else float("nan")
-        sdnn = float(np.std(corrected, ddof=1)) if corrected.size > 1 else float("nan")
-        hr_bpm = float(60000.0 / np.nanmean(corrected)) if np.nanmean(corrected) > 0 else float("nan")
-        rr_cv = float(np.nanstd(corrected) / np.nanmean(corrected)) if np.nanmean(corrected) > 0 else float("nan")
+        rmssd = float(np.sqrt(np.mean(diff ** 2))) if diff.size else float("nan")  # 连续差值均方根
+        sdnn = float(np.std(corrected, ddof=1)) if corrected.size > 1 else float("nan")  # NN 间期标准差
+        hr_bpm = float(60000.0 / np.nanmean(corrected)) if np.nanmean(corrected) > 0 else float("nan")  # 心率 BPM
+        rr_cv = float(np.nanstd(corrected) / np.nanmean(corrected)) if np.nanmean(corrected) > 0 else float("nan")  # 变异系数
     else:
         corrected = np.array([], dtype=np.float64)
         corr_ratio = float("nan")
@@ -212,11 +295,20 @@ def _ecg_label_for_window(
         hr_bpm = float("nan")
         rr_cv = float("nan")
 
+    # ★ QRS 信号质量指数与 R-peak 振幅
     qrs_sqi = _simple_ecg_qrs_sqi(clean if clean.size else seg, local_peak_idx, ecg_fs)
     peak_amp = []
     for p in local_peak_idx:
         if 0 <= int(p) < seg.size:
             peak_amp.append(float(seg[int(p)]))
+    # ★★ ECG 标签质控判断（重点）
+    # 综合以下条件决定该窗口的 ECG 标签是否可信：
+    #   - ECG 有效样本覆盖率 >= 阈值
+    #   - 有效 IBI 比例 >= 阈值
+    #   - R-peak 数量足够（至少 3 个，且不低于基于最低心率计算的下限）
+    #   - RMSSD 有限且不超标
+    #   - IBI 校正比例不超标
+    #   - 心率在合理范围内
     min_peak_count = int(math.floor((window_ms / 1000.0) * min_hr_bpm / 60.0))
     qc_pass = bool(
         valid_ratio >= min_ecg_valid_sample_ratio
@@ -227,46 +319,53 @@ def _ecg_label_for_window(
         and (not np.isfinite(hr_bpm) or (min_hr_bpm <= hr_bpm <= max_hr_bpm))
         and (not np.isfinite(rmssd) or rmssd <= DEFAULT_MAX_RMSSD_MS)
     )
+    # 收集质控失败原因（用于诊断和调试）
     reasons: list[str] = []
     if valid_ratio < min_ecg_valid_sample_ratio:
-        reasons.append("low_ecg_sample_ratio")
+        reasons.append("low_ecg_sample_ratio")          # ECG 采样覆盖率不足
     if valid_ibi_ratio < min_valid_ibi_ratio:
-        reasons.append("low_ecg_valid_ibi_ratio")
+        reasons.append("low_ecg_valid_ibi_ratio")       # 有效 IBI 比例过低
     if peak_count < max(3, min_peak_count):
-        reasons.append("too_few_ecg_peaks")
+        reasons.append("too_few_ecg_peaks")             # R-peak 数量不足
     if not np.isfinite(rmssd):
-        reasons.append("invalid_ecg_hrv")
+        reasons.append("invalid_ecg_hrv")               # HRV 指标无效
     if np.isfinite(corr_ratio) and corr_ratio > DEFAULT_MAX_IBI_CORRECTION_RATIO:
-        reasons.append("high_ecg_ibi_correction_ratio")
+        reasons.append("high_ecg_ibi_correction_ratio") # IBI 校正比例过高
     if np.isfinite(hr_bpm) and not (min_hr_bpm <= hr_bpm <= max_hr_bpm):
-        reasons.append("ecg_hr_out_of_range")
+        reasons.append("ecg_hr_out_of_range")           # 心率超出合理范围
     if np.isfinite(rmssd) and rmssd > DEFAULT_MAX_RMSSD_MS:
-        reasons.append("ecg_rmssd_too_high")
+        reasons.append("ecg_rmssd_too_high")            # RMSSD 过高
     if detector_method == "bad_ecg_fs":
-        reasons.append(detector_method)
+        reasons.append(detector_method)                  # ECG 采样率异常
 
+    # 返回完整的 ECG 标签和质控结果字典
     return {
-        "ecg_r_peak_times_rel_ms": rel_ms.astype(np.float32),
-        "ecg_r_peak_indices_50hz": np.rint(rel_ms / 1000.0 * target_fs).astype(np.int32),
-        "ecg_r_peak_amplitudes_raw": np.asarray(peak_amp, dtype=np.float32),
-        "ecg_rr_intervals_ms": rr.astype(np.float32),
-        "ecg_rr_intervals_corrected_ms": corrected.astype(np.float32),
-        "ecg_rmssd_ms": rmssd,
-        "ecg_sdnn_ms": sdnn,
-        "ecg_valid_sample_ratio": valid_ratio,
-        "ecg_valid_ibi_ratio": valid_ibi_ratio,
-        "ecg_ibi_correction_ratio": corr_ratio,
-        "ecg_qc_pass": qc_pass,
-        "ecg_qc_reason": "ok" if qc_pass else ";".join(reasons),
-        "ecg_label_qc_pass": qc_pass,
-        "ecg_label_qc_reason": "ok" if qc_pass else ";".join(reasons),
-        "ecg_qrs_sqi": qrs_sqi,
-        "ecg_peak_count": peak_count,
-        "ecg_hr_bpm": hr_bpm,
-        "ecg_rr_cv": rr_cv,
+        "ecg_r_peak_times_rel_ms": rel_ms.astype(np.float32),          # R-peak 相对时间（主标签）
+        "ecg_r_peak_indices_50hz": np.rint(rel_ms / 1000.0 * target_fs).astype(np.int32),  # 映射到 50Hz 网格的索引
+        "ecg_r_peak_amplitudes_raw": np.asarray(peak_amp, dtype=np.float32),  # R-peak 原始振幅
+        "ecg_rr_intervals_ms": rr.astype(np.float32),                  # RR 间期
+        "ecg_rr_intervals_corrected_ms": corrected.astype(np.float32), # 校正后 RR 间期
+        "ecg_rmssd_ms": rmssd,                                         # RMSSD (ms)
+        "ecg_sdnn_ms": sdnn,                                           # SDNN (ms)
+        "ecg_valid_sample_ratio": valid_ratio,                         # ECG 有效样本覆盖率
+        "ecg_valid_ibi_ratio": valid_ibi_ratio,                        # 有效 IBI 比例
+        "ecg_ibi_correction_ratio": corr_ratio,                        # IBI 校正比例
+        "ecg_qc_pass": qc_pass,                                        # 质控是否通过
+        "ecg_qc_reason": "ok" if qc_pass else ";".join(reasons),       # 质控原因
+        "ecg_label_qc_pass": qc_pass,                                  # 标签质控是否通过
+        "ecg_label_qc_reason": "ok" if qc_pass else ";".join(reasons), # 标签质控原因
+        "ecg_qrs_sqi": qrs_sqi,                                        # QRS 信号质量指数
+        "ecg_peak_count": peak_count,                                  # R-peak 计数
+        "ecg_hr_bpm": hr_bpm,                                          # 心率 (BPM)
+        "ecg_rr_cv": rr_cv,                                            # RR 变异系数
     }
 
 
+# ---------------------------------------------------------------------------
+# 辅助函数：从原始数据计算每个设备的运动检测阈值
+# 将加速度计数据按段切分，计算每段的加速度幅值标准差，
+# 然后取指定百分位数作为该设备的运动阈值
+# ---------------------------------------------------------------------------
 def _motion_thresholds_from_raw(
     ppg_raw: dict[str, dict[str, np.ndarray]],
     *,
@@ -278,11 +377,13 @@ def _motion_thresholds_from_raw(
         t = np.asarray(d["timestamp"], dtype=np.float64)
         fs = _infer_fs_ms(t)
         seg_n = max(1, int(round(seg_sec * fs))) if np.isfinite(fs) else 1000
+        # 计算三轴加速度的合成幅值
         mag = np.sqrt(
             np.asarray(d["accel_x"], dtype=np.float64) ** 2
             + np.asarray(d["accel_y"], dtype=np.float64) ** 2
             + np.asarray(d["accel_z"], dtype=np.float64) ** 2
         )
+        # 按段计算标准差，然后取百分位数作为阈值
         n_seg = mag.size // seg_n
         if n_seg <= 0:
             vals = np.array([np.nanstd(mag)], dtype=np.float64)
@@ -292,6 +393,11 @@ def _motion_thresholds_from_raw(
     return thresholds
 
 
+# ---------------------------------------------------------------------------
+# 辅助函数：计算单个窗口内某设备的运动占比
+# 将窗口内的加速度数据按段切分，计算每段的标准差是否超过阈值，
+# 返回超阈值段数的占比（仅作为元数据，不影响窗口保留决策）
+# ---------------------------------------------------------------------------
 def _motion_fraction_window(
     dev_raw: dict[str, np.ndarray],
     *,
@@ -320,9 +426,14 @@ def _motion_fraction_window(
     return float(np.nanmean(stds > threshold)) if np.isfinite(threshold) else float("nan")
 
 
+# ---------------------------------------------------------------------------
+# 辅助函数：生成数据集的 README.md 文档
+# 包含配置参数、窗口纳入规则、字段说明和汇总统计信息
+# ---------------------------------------------------------------------------
 def _write_readme(out_dir: Path, dataset_name: str, cfg: dict[str, object], summary: pd.DataFrame) -> None:
     total = int(summary["n_kept"].sum()) if "n_kept" in summary else 0
     participants = int((summary["n_kept"] > 0).sum()) if "n_kept" in summary else 0
+    n_devices = len(cfg.get("devices", DEVICES))
     text = f"""# {dataset_name}
 
 This dataset was generated from `snowballlab/Multisite-PPG/raw_data` by aligning
@@ -338,7 +449,7 @@ raw timelines first and then cutting shared absolute-time windows.
 
 A window is kept only if:
 
-1. all four PPG devices have samples near the shared window start and end within
+1. all selected PPG devices have samples near the shared window start and end within
    `alignment_tolerance_sec`;
 2. every device/channel has `ppg_valid_sample_ratio >= min_valid_sample_ratio`
    after 50 Hz resampling;
@@ -352,7 +463,7 @@ only. They are not used to remove windows.
 - kept windows: {total}
 - participants with kept windows: {participants}
 - primary label: `ecg_r_peak_times_rel_ms`
-- model input: `ppg_50hz` with shape `(N, 4, 2, target_len)`
+- model input: `ppg_50hz` with shape `(N, {n_devices}, 2, target_len)`
 - missing-sample mask: `ppg_valid_mask_50hz`
 
 ## Important Fields
@@ -378,12 +489,23 @@ See `{dataset_name}_summary.csv` for per-participant counts and quality means.
     (out_dir / "README.md").write_text(text, encoding="utf-8")
 
 
+# ===========================================================================
+# ★★★ 核心函数：单个参与者的数据集生成流水线（最重点）
+# ===========================================================================
+# 对单个参与者执行完整的数据集生成流程：
+#   1. 加载原始 PPG + ECG 数据
+#   2. 生成候选窗口并按边界对齐和 ECG 质控筛选
+#   3. 对通过初筛的窗口进行 PPG 重采样和 PPG 波峰检测
+#   4. 按 PPG 采样覆盖率做最终筛选
+#   5. 保存结果为 .npz 文件并输出汇总 CSV
+# ---------------------------------------------------------------------------
 def generate_participant(
     pid: str,
     *,
     raw_root: Path,
     out_dir: Path,
     dataset_name: str,
+    devices: list[str],
     window_sec: int,
     stride_sec: int,
     target_fs: float,
@@ -399,25 +521,29 @@ def generate_participant(
     max_hr_bpm: float,
     max_windows: int | None,
 ) -> Path | None:
+    # --- 第 1 步：加载原始数据并计算基本参数 ---
     print(f"[{pid}] loading raw data")
-    ppg_raw = _load_ppg_raw(raw_root, pid)
-    ecg_raw = _load_ecg_raw(raw_root, pid)
-    target_len = int(round(window_sec * target_fs))
-    sample_step_ms = 1000.0 / target_fs
+    ppg_raw = _load_ppg_raw(raw_root, pid, devices)    # 加载四设备 PPG
+    ecg_raw = _load_ecg_raw(raw_root, pid)              # 加载 ECG
+    target_len = int(round(window_sec * target_fs))     # 窗口在 50Hz 下的样本数
+    sample_step_ms = 1000.0 / target_fs                 # 每个样本间隔（ms）
     window_ms = window_sec * 1000.0
     tolerance_ms = alignment_tolerance_sec * 1000.0
 
+    # --- 第 2 步：生成候选窗口 ---
     t0_all, t1_all, overlap_info = _candidate_windows(
         ppg_raw,
         ecg_raw,
+        devices=devices,
         window_sec=window_sec,
         stride_sec=stride_sec,
     )
-    if max_windows is not None:
+    if max_windows is not None:  # 调试用：限制最大窗口数
         t0_all = t0_all[:max_windows]
         t1_all = t1_all[:max_windows]
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    # 无候选窗口时直接跳过
     if t0_all.size == 0:
         summary = {
             "participant": pid,
@@ -433,6 +559,7 @@ def generate_participant(
         print(f"[SKIP] {pid}: no raw common overlap")
         return None
 
+    # --- 推断 ECG 采样率并计算运动阈值 ---
     ecg_fs = _ecg_fs_from_raw(ecg_raw)
     ecg_detector = "window_pantompkins1985"
     print(f"[{pid}] ECG fs={ecg_fs:.3f}, detector={ecg_detector}")
@@ -442,19 +569,22 @@ def generate_participant(
         seg_sec=motion_seg_sec,
     )
 
-    boundary_keep = []
-    max_start_diff_ms = []
-    max_end_diff_ms = []
-    ppg_sample_keep_pre = []
-    ecg_keep_pre = []
-    labels: list[dict[str, object]] = []
+    # --- 第 3 步：★ 边界对齐检查 + ECG 质控筛选（重点） ---
+    boundary_keep = []           # 每个窗口是否通过边界对齐
+    max_start_diff_ms = []       # 最大起始偏移
+    max_end_diff_ms = []         # 最大结束偏移
+    ppg_sample_keep_pre = []     # PPG 采样初筛结果
+    ecg_keep_pre = []            # ECG 质控初筛结果
+    labels: list[dict[str, object]] = []  # ECG 标签字典列表
 
+    # 遍历每个候选窗口，检查边界对齐和 ECG 标签质控
     print(f"[{pid}] screening {t0_all.size} candidate windows")
     for wi, (t0, t1) in enumerate(zip(t0_all, t1_all)):
         start_offsets = []
         end_offsets = []
         boundary_ok = True
-        for dev in DEVICES:
+        # 检查每个设备在窗口起止处的偏移是否在容许范围内
+        for dev in devices:
             so, eo, _n = _boundary_offsets_ms(ppg_raw[dev]["timestamp"], float(t0), float(t1))
             start_offsets.append(so)
             end_offsets.append(eo)
@@ -468,6 +598,7 @@ def generate_participant(
             ppg_sample_keep_pre.append(False)
             ecg_keep_pre.append(False)
             continue
+        # 边界对齐通过后，执行 ECG 标签生成与质控
         label = _ecg_label_for_window(
             ecg_raw,
             ecg_fs,
@@ -482,8 +613,9 @@ def generate_participant(
         )
         labels.append(label)
         ecg_keep_pre.append(bool(label["ecg_label_qc_pass"]))
-        ppg_sample_keep_pre.append(True)  # exact per-channel check happens while resampling
+        ppg_sample_keep_pre.append(True)  # PPG 采样率的精确检查在重采样时进行
 
+    # ★ 合并边界对齐 + ECG 质控结果，筛选出初步保留的窗口索引
     boundary_keep_arr = np.asarray(boundary_keep, dtype=bool)
     ecg_keep_arr = np.asarray(ecg_keep_pre, dtype=bool)
     prelim_idx = np.where(boundary_keep_arr & ecg_keep_arr)[0]
@@ -502,31 +634,36 @@ def generate_participant(
         print(f"[SKIP] {pid}: no windows after boundary + ECG QC")
         return None
 
+    # --- 第 4 步：★ 预分配输出数组（重点） ---
+    # ppg 形状: (n_windows, n_devices, n_channels, target_len)
     n_pre = int(prelim_idx.size)
-    ppg = np.zeros((n_pre, len(DEVICES), len(CHANNELS), target_len), dtype=np.float32)
+    ppg = np.zeros((n_pre, len(devices), len(CHANNELS), target_len), dtype=np.float32)
     ppg_valid_mask = np.zeros_like(ppg, dtype=bool)
-    ppg_valid_sample_ratio = np.zeros((n_pre, len(DEVICES), len(CHANNELS)), dtype=np.float32)
+    ppg_valid_sample_ratio = np.zeros((n_pre, len(devices), len(CHANNELS)), dtype=np.float32)
     ppg_valid_ibi_ratio = np.zeros_like(ppg_valid_sample_ratio)
     ppg_sqi_arr = np.zeros_like(ppg_valid_sample_ratio)
     ppg_ibi_correction_ratio = np.full_like(ppg_valid_sample_ratio, np.nan)
     ppg_rmssd = np.full_like(ppg_valid_sample_ratio, np.nan)
     ppg_sdnn = np.full_like(ppg_valid_sample_ratio, np.nan)
-    ppg_quality_flag = np.zeros((n_pre, len(DEVICES), len(CHANNELS)), dtype=bool)
-    ppg_quality_reason = np.empty((n_pre, len(DEVICES), len(CHANNELS)), dtype=object)
-    motion_fraction = np.zeros((n_pre, len(DEVICES)), dtype=np.float32)
+    ppg_quality_flag = np.zeros((n_pre, len(devices), len(CHANNELS)), dtype=bool)
+    ppg_quality_reason = np.empty((n_pre, len(devices), len(CHANNELS)), dtype=object)
+    motion_fraction = np.zeros((n_pre, len(devices)), dtype=np.float32)
 
-    ppg_peak_times = _empty_object_array((n_pre, len(DEVICES), len(CHANNELS)))
-    ppg_peak_indices = _empty_object_array((n_pre, len(DEVICES), len(CHANNELS)))
-    ppg_peak_amplitudes = _empty_object_array((n_pre, len(DEVICES), len(CHANNELS)))
-    ppg_ibi = _empty_object_array((n_pre, len(DEVICES), len(CHANNELS)))
-    ppg_ibi_corrected = _empty_object_array((n_pre, len(DEVICES), len(CHANNELS)))
+    # 变长数据用 object 数组存储（PPG 波峰、IBI 等）
+    ppg_peak_times = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
+    ppg_peak_indices = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
+    ppg_peak_amplitudes = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
+    ppg_ibi = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
+    ppg_ibi_corrected = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
 
+    # --- 第 5 步：★★ PPG 重采样、波峰检测和质控（重点） ---
     final_keep = np.ones(n_pre, dtype=bool)
     print(f"[{pid}] resampling PPG for {n_pre} ECG-valid windows")
     for out_i, wi in enumerate(prelim_idx):
         t0 = float(t0_all[wi])
-        grid_ms = t0 + np.arange(target_len, dtype=np.float64) * sample_step_ms
-        for di, dev in enumerate(DEVICES):
+        grid_ms = t0 + np.arange(target_len, dtype=np.float64) * sample_step_ms  # 50Hz 时间网格
+        for di, dev in enumerate(devices):
+            # 计算该设备在此窗口的运动占比（元数据）
             motion_fraction[out_i, di] = _motion_fraction_window(
                 ppg_raw[dev],
                 t0=t0,
@@ -534,12 +671,14 @@ def generate_participant(
                 threshold=motion_threshold[dev],
                 seg_sec=motion_seg_sec,
             )
+            # 截取窗口附近的原始 PPG 数据（带边距容差）
             dev_t = np.asarray(ppg_raw[dev]["timestamp"], dtype=np.float64)
             seg_lo = int(np.searchsorted(dev_t, t0 - max_source_gap_ms, side="left"))
             seg_hi = int(np.searchsorted(dev_t, float(t1_all[wi]) + max_source_gap_ms, side="right"))
             seg_t = dev_t[seg_lo:seg_hi]
             for ci, ch in enumerate(CHANNELS):
                 seg_x = np.asarray(ppg_raw[dev][ch][seg_lo:seg_hi], dtype=np.float64)
+                # ★ 将原始 PPG 重采样到 50Hz 统一网格
                 raw_50, valid_mask, valid_ratio = _resample_to_grid(
                     seg_x,
                     seg_t,
@@ -549,8 +688,10 @@ def generate_participant(
                 ppg[out_i, di, ci] = raw_50
                 ppg_valid_mask[out_i, di, ci] = valid_mask
                 ppg_valid_sample_ratio[out_i, di, ci] = valid_ratio
+                # ★ PPG 采样覆盖率检查：不达标则标记为丢弃
                 if valid_ratio < min_valid_sample_ratio:
                     final_keep[out_i] = False
+                # PPG 波峰检测与 HRV 计算（仅作为元数据）
                 peak_signal = _preprocess_for_peaks(raw_50, target_fs, preprocess_mode)
                 peak_info = _ppg_peaks_and_qc(raw_50, peak_signal, fs=target_fs, valid_sample_ratio=valid_ratio)
                 ppg_peak_times[out_i, di, ci] = peak_info["ppg_peak_times_rel_ms"]
@@ -563,6 +704,7 @@ def generate_participant(
                 ppg_sdnn[out_i, di, ci] = peak_info["ppg_sdnn_ms"]
                 ppg_valid_ibi_ratio[out_i, di, ci] = peak_info["ppg_valid_ibi_ratio"]
                 ppg_sqi_arr[out_i, di, ci] = peak_info["ppg_sqi"]
+                # PPG 单通道质控（元数据，不影响窗口保留）
                 qflag, qreason = _ppg_channel_qc(
                     valid_sample_ratio=valid_ratio,
                     valid_ibi_ratio=peak_info["ppg_valid_ibi_ratio"],
@@ -578,6 +720,8 @@ def generate_participant(
                 ppg_quality_flag[out_i, di, ci] = qflag
                 ppg_quality_reason[out_i, di, ci] = qreason
 
+    # --- 第 6 步：最终筛选 ---
+    # 仅保留所有设备/通道的 PPG 采样覆盖率均达标的窗口
     keep_idx = np.where(final_keep)[0]
     if keep_idx.size == 0:
         summary = {
@@ -594,14 +738,16 @@ def generate_participant(
         print(f"[SKIP] {pid}: no windows after PPG sample coverage")
         return None
 
+    # --- 第 7 步：★ 保存结果为压缩 .npz 文件（重点） ---
     kept_wi = prelim_idx[keep_idx]
     kept_labels = [labels[int(wi)] for wi in kept_wi]
     out_path = out_dir / f"{dataset_name}_{pid}.npz"
+    # 将配置信息嵌入到输出文件中
     cfg = {
         "dataset_name": dataset_name,
         "participant": pid,
         "source": "snowballlab/Multisite-PPG/raw_data local mirror",
-        "devices": DEVICES,
+        "devices": devices,
         "channels": CHANNELS,
         "window_sec": window_sec,
         "stride_sec": stride_sec,
@@ -626,7 +772,7 @@ def generate_participant(
         out_path,
         config_json=np.array(json.dumps(cfg, ensure_ascii=False)),
         participant=np.array(pid),
-        devices=np.array(DEVICES),
+        devices=np.array(devices),
         channels=np.array(CHANNELS),
         t0_ms=t0_all[kept_wi],
         t1_ms=t1_all[kept_wi],
@@ -648,7 +794,7 @@ def generate_participant(
         ppg_quality_flag=ppg_quality_flag[keep_idx],
         ppg_quality_reason=ppg_quality_reason[keep_idx],
         motion_fraction=motion_fraction[keep_idx],
-        motion_threshold=np.array([motion_threshold[d] for d in DEVICES], dtype=np.float32),
+        motion_threshold=np.array([motion_threshold[d] for d in devices], dtype=np.float32),
         ecg_r_peak_times_rel_ms=np.array([x["ecg_r_peak_times_rel_ms"] for x in kept_labels], dtype=object),
         ecg_r_peak_indices_50hz=np.array([x["ecg_r_peak_indices_50hz"] for x in kept_labels], dtype=object),
         ecg_r_peak_amplitudes_raw=np.array([x["ecg_r_peak_amplitudes_raw"] for x in kept_labels], dtype=object),
@@ -670,6 +816,7 @@ def generate_participant(
         ecg_rpeak_detector_agreement=np.full(keep_idx.size, np.nan, dtype=np.float32),
     )
 
+    # --- 第 8 步：输出汇总统计 ---
     summary = {
         "participant": pid,
         "n_candidate_windows": int(t0_all.size),
@@ -702,40 +849,60 @@ def generate_participant(
     return out_path
 
 
+# ===========================================================================
+# ★ 主入口函数（重点）
+# ===========================================================================
+# 解析命令行参数 -> 遍历每个参与者调用 generate_participant -> 汇总结果
+# ---------------------------------------------------------------------------
 def main() -> None:
+    # --- 命令行参数定义 ---
     ap = argparse.ArgumentParser(description="Generate raw-aligned 4-device ECG-label dataset.")
-    ap.add_argument("--participants", default=None)
-    ap.add_argument("--exclude", default="P2,P14,P16,P17")
-    ap.add_argument("--raw-root", default=str(RAW_ROOT))
-    ap.add_argument("--dataset-name", required=True)
-    ap.add_argument("--out-dir", default=None)
-    ap.add_argument("--window-sec", type=int, default=300)
-    ap.add_argument("--stride-sec", type=int, default=300)
-    ap.add_argument("--target-fs", type=float, default=50.0)
-    ap.add_argument("--alignment-tolerance-sec", type=float, default=2.0)
-    ap.add_argument("--min-valid-sample-ratio", type=float, default=0.50)
-    ap.add_argument("--max-source-gap-ms", type=float, default=500.0)
-    ap.add_argument("--preprocess-mode", choices=("bandpass", "raw"), default="bandpass")
-    ap.add_argument("--motion-seg-sec", type=float, default=10.0)
-    ap.add_argument("--motion-percentile", type=float, default=75.0)
-    ap.add_argument("--ecg-min-valid-ibi-ratio", type=float, default=0.80)
-    ap.add_argument("--min-ecg-valid-sample-ratio", type=float, default=0.95)
-    ap.add_argument("--min-hr-bpm", type=float, default=30.0)
-    ap.add_argument("--max-hr-bpm", type=float, default=200.0)
-    ap.add_argument("--max-windows", type=int, default=None)
+    ap.add_argument("--participants", default=None)          # 指定参与者（逗号分隔）
+    ap.add_argument("--exclude", default="P2,P14,P16,P17")   # 排除的参与者
+    ap.add_argument(
+        "--devices",
+        default=",".join(DEVICES),
+        help="Comma-separated PPG devices to include. Default: all devices.",
+    )
+    ap.add_argument("--raw-root", default=str(RAW_ROOT))                  # 原始数据根目录
+    ap.add_argument("--dataset-name", required=True)                       # 数据集名称（必填）
+    ap.add_argument("--out-dir", default=None)                              # 输出目录
+    ap.add_argument("--window-sec", type=int, default=300)                  # 窗口时长（秒）
+    ap.add_argument("--stride-sec", type=int, default=300)                  # 窗口步长（秒）
+    ap.add_argument("--target-fs", type=float, default=50.0)                # 目标采样率 (Hz)
+    ap.add_argument("--alignment-tolerance-sec", type=float, default=2.0)   # 边界对齐容差（秒）
+    ap.add_argument("--min-valid-sample-ratio", type=float, default=0.50)   # PPG 最低有效采样比
+    ap.add_argument("--max-source-gap-ms", type=float, default=500.0)       # 重采样最大源间隔 (ms)
+    ap.add_argument("--preprocess-mode", choices=("bandpass", "raw"), default="bandpass")  # 预处理模式
+    ap.add_argument("--motion-seg-sec", type=float, default=10.0)           # 运动检测段长（秒）
+    ap.add_argument("--motion-percentile", type=float, default=75.0)        # 运动阈值百分位数
+    ap.add_argument("--ecg-min-valid-ibi-ratio", type=float, default=0.80)  # ECG 最低有效 IBI 比
+    ap.add_argument("--min-ecg-valid-sample-ratio", type=float, default=0.95)  # ECG 最低有效采样比
+    ap.add_argument("--min-hr-bpm", type=float, default=30.0)               # 最低心率 (BPM)
+    ap.add_argument("--max-hr-bpm", type=float, default=200.0)              # 最高心率 (BPM)
+    ap.add_argument("--max-windows", type=int, default=None)                # 调试用：最大窗口数
     args = ap.parse_args()
 
+    # --- 解析参数并准备输入 ---
     raw_root = Path(args.raw_root).resolve()
     out_dir = Path(args.out_dir).resolve() if args.out_dir else (config.HEURISTIC_RESULT_ROOT / args.dataset_name).resolve()
     participants = _participant_ids(raw_root, args.participants)
     excluded = {normalize_participant_id(p) for p in args.exclude.split(",") if p.strip()}
-    participants = [p for p in participants if p not in excluded]
+    participants = [p for p in participants if p not in excluded]  # 过滤排除的参与者
+    # 设备名称校验
+    device_lookup = {d.lower(): d for d in DEVICES}
+    devices = [device_lookup.get(d.strip().lower(), d.strip()) for d in args.devices.split(",") if d.strip()]
+    unknown_devices = sorted(set(devices) - set(DEVICES))
+    if unknown_devices:
+        raise SystemExit(f"Unknown devices: {unknown_devices}. Valid devices: {DEVICES}")
 
+    # --- 保存全局配置并开始遍历参与者 ---
     cfg = {
         "dataset_name": args.dataset_name,
         "raw_root": str(raw_root),
         "participants": participants,
         "excluded": sorted(excluded),
+        "devices": devices,
         "window_sec": args.window_sec,
         "stride_sec": args.stride_sec,
         "target_fs": args.target_fs,
@@ -754,7 +921,9 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "config.json").write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
+    # --- ★ 遍历每个参与者执行数据集生成 ---
     print(f"[rawaligned] participants={participants}")
+    print(f"[rawaligned] devices={devices}")
     print(f"[rawaligned] out_dir={out_dir}")
     paths = []
     for pid in participants:
@@ -764,6 +933,7 @@ def main() -> None:
                 raw_root=raw_root,
                 out_dir=out_dir,
                 dataset_name=args.dataset_name,
+                devices=devices,
                 window_sec=args.window_sec,
                 stride_sec=args.stride_sec,
                 target_fs=args.target_fs,
@@ -782,6 +952,7 @@ def main() -> None:
             if path is not None:
                 paths.append(path)
         except Exception as exc:
+            # 异常处理：记录错误信息并继续处理下一个参与者
             summary = {
                 "participant": pid,
                 "n_candidate_windows": 0,
@@ -794,6 +965,7 @@ def main() -> None:
             pd.DataFrame([summary]).to_csv(out_dir / f"{args.dataset_name}_{pid}_summary.csv", index=False)
             print(f"[ERROR] {pid}: {exc!r}")
 
+    # --- 汇总所有参与者的统计结果并生成 README ---
     summaries = []
     for csv_path in sorted(out_dir.glob(f"{args.dataset_name}_P*_summary.csv")):
         summaries.append(pd.read_csv(csv_path))
