@@ -34,6 +34,7 @@ from models.models_nc import ResNet1D
 from data_preprocess.data_prep import setup_dataloaders
 from data_preprocess.participants_config import discover_participants
 from data_preprocess.data_preprocess_multisite import discover_multisite_participants
+import hrv_ext as H
 
 
 # ── Argument parser ───────────────────────────────────────────────────────────
@@ -80,6 +81,12 @@ parser.add_argument('--logdir', default='log/', type=str,
                     help='Directory for per-run log files.')
 parser.add_argument('--use_preprocess', action='store_true')
 
+parser.add_argument('--task', default='hr', choices=['hr', 'hrv', 'peak'])
+parser.add_argument('--device_name', default='watch', choices=['earring','ring','watch'])
+parser.add_argument('--use_deriv', type=int, default=1)
+parser.add_argument('--resample_hz', type=float, default=0)   # 0 = keep 100Hz; 50 recommended first
+parser.add_argument('--src_hz', type=float, default=100.0)
+parser.add_argument('--limit', type=int, default=0)           # cap windows/subject (smoke); 0 = no cap
 
 # ── Reproducibility ───────────────────────────────────────────────────────────
 
@@ -102,29 +109,32 @@ def build_model(args):
     All models receive n_channels=args.n_feature
     (1 for single, 4 for multisite, 8 for multisite+accel).
     """
+    if args.task == 'peak':                         # Path B: per-sample output, uses built-in U-Net
+        return H.PeakNet(H.n_input_channels(args))
+    n_cls = 2 if args.task == 'hrv' else 1          # Path A: 2 HRV scalars
     n_ch = args.n_feature
     len_ = args.len_sw      # 200
 
     if args.backbone == 'FCN':
-        return FCN(n_channels=n_ch, in_dim=len_, n_classes=1,
+        return FCN(n_channels=n_ch, in_dim=len_, n_classes=n_cls,
                    backbone=False, regress=True)
     elif args.backbone == 'DCL':
-        return DeepConvLSTM(n_channels=n_ch, n_classes=1,
+        return DeepConvLSTM(n_channels=n_ch, n_classes=n_cls,
                             conv_kernels=64, kernel_size=5, LSTM_units=128,
                             backbone=False, regress=True)
     elif args.backbone == 'cnn_lstm':
-        return cnn_lstm(n_channels=n_ch, n_classes=1,
+        return cnn_lstm(n_channels=n_ch, n_classes=n_cls,
                         backbone=False, regress=True)
     elif args.backbone == 'LSTM':
-        return LSTM(n_channels=n_ch, n_classes=1, LSTM_units=256,
+        return LSTM(n_channels=n_ch, n_classes=n_cls, LSTM_units=256,
                     backbone=False, regress=True)
     elif args.backbone == 'Transformer':
-        return Transformer(n_channels=n_ch, len_sw=len_, n_classes=1,
+        return Transformer(n_channels=n_ch, len_sw=len_, n_classes=n_cls,
                            dim=128, depth=4, heads=4, mlp_dim=64,
                            dropout=0.1, backbone=False, regress=True)
     elif args.backbone == 'resnet':
         return ResNet1D(in_channels=n_ch, base_filters=32, kernel_size=5,
-                        stride=2, groups=1, n_block=8, n_classes=1,
+                        stride=2, groups=1, n_block=8, n_classes=n_cls,
                         downsample_gap=2, increasefilter_gap=4,
                         backbone=False, regress=True)
     else:
@@ -272,7 +282,10 @@ def train_sup(args, seed_idx: int):
 
     device = torch.device(f'cuda:{args.cuda}' if torch.cuda.is_available() else 'cpu')
 
-    train_loaders, val_loader, test_loader = setup_dataloaders(args)
+    if args.task in ('hrv', 'peak'):
+        train_loaders, val_loader, test_loader = H.setup_dataloaders_hrv(args)
+    else:
+        train_loaders, val_loader, test_loader = setup_dataloaders(args)
 
     model = build_model(args).to(device)
 
@@ -289,7 +302,7 @@ def train_sup(args, seed_idx: int):
     logging.basicConfig(filename=log_path, level=logging.INFO,
                         format='%(asctime)s %(message)s')
 
-    criterion = nn.L1Loss()
+    criterion = H.make_criterion(args) if args.task in ('hrv','peak') else nn.L1Loss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     best_state = train(args, train_loaders, val_loader, model, device, optimizer, criterion)
@@ -298,18 +311,37 @@ def train_sup(args, seed_idx: int):
     model_test.load_state_dict(best_state)
 
     pred_path = f"predictions/{args.backbone}_{args.dataset}_{position_tag}.txt"
-    mae, rmse, r = test(test_loader, model_test, device, criterion,
-                        save_path=pred_path, append=True,
-                        participant_id=args.target_domain)
-    return mae, rmse, r
+
+    if args.task == 'hrv':
+        res, bres = H.test_hrv(test_loader, model_test, device, args, args.target_domain)
+        return ('hrv', res, bres)
+    elif args.task == 'peak':
+        res, bres = H.test_peak(test_loader, model_test, device, args, args.target_domain)
+        return ('peak', res, bres)
+    else:
+        mae, rmse, r = test(test_loader, model_test, device, criterion,
+                            save_path=pred_path, append=True, participant_id=args.target_domain)
+        return ('hr', mae, rmse, r)
 
 
 # ── Dataset config ────────────────────────────────────────────────────────────
 
 def configure_dataset(args):
+    if args.task in ('hrv', 'peak'):
+        step = int(round(args.src_hz / args.resample_hz)) if args.resample_hz else 1
+        args.len_sw    = (30000 + step - 1) // step      # length after downsampling
+        args.out_dim   = args.len_sw
+        args.n_feature = H.n_input_channels(args)         # = 4 (green+ir+derivative)
+        args.position  = None
+        parts = H.discover_hrv_participants(args.data_dir)
+        if not parts:
+            raise FileNotFoundError(f"No *_P*.npz in {args.data_dir}")
+        print(f"[{args.task}] {len(parts)} participants: {parts}")
+        return parts
+
+# ---- keep original hr logic below unchanged ----
     args.len_sw  = 200
     args.out_dim = 200
-
     if args.dataset == 'ppg':
         args.n_feature = 1      # green only, single position
         if args.position is None:
@@ -359,22 +391,38 @@ if __name__ == '__main__':
         for pid in participants:
             print(f"\n  Target participant: {pid}")
             args.target_domain = pid
+            out = train_sup(args, seed_idx)
 
-            mae, rmse, r = train_sup(args, seed_idx)
-            fold_results.append([mae, rmse, r])
-            print(f"    MAE: {mae:.2f} bpm | RMSE: {rmse:.2f} bpm | R: {r:.4f}")
-
-        fold_mean = np.mean(fold_results, axis=0)
-        print(f"\n  Seed {seed_idx + 1} mean — "
-              f"MAE: {fold_mean[0]:.2f}  RMSE: {fold_mean[1]:.2f}  R: {fold_mean[2]:.4f}")
+            if out[0] == 'hr':
+                _, mae, rmse, r = out
+                fold_results.append([mae, rmse, r])
+                print(f"    MAE {mae:.2f} | RMSE {rmse:.2f} | R {r:.4f}")
+            else:                                   # hrv / peak: per-metric R2/MAE
+                _, res, bres = out
+                fold_results.append(res)
+                for k, v in res.items():
+                    print(f"    {k:12s} R2={v['r2']:6.3f}  MAE={v['mae']:6.2f} ms")
+                if bres:
+                    for k, v in bres.items():
+                        print(f"    (PRV) {k:12s} R2={v['r2']:6.3f}  MAE={v['mae']:6.2f} ms")
         all_seed_results.append(fold_results)
 
+
     # ── Final summary across all participants
-    flat = np.array(all_seed_results).reshape(-1, 3)   # ← (n_seeds * n_participants, 3)
-    overall_mean = flat.mean(axis=0)
-    overall_std  = flat.std(axis=0)
-    print(f"\n{'='*60}")
-    print(f"Final results (mean ± std across {flat.shape[0]} participant-runs)")
+    if args.task in ('hrv', 'peak'):
+        flat = [r for seed in all_seed_results for r in seed]   # list of dict
+        print(f"\n{'='*60}\nFinal ({len(flat)} folds, mean +/- std):")
+        for k in H.LABEL_KEYS:
+            r2  = np.array([f[k]['r2']  for f in flat])
+            mae = np.array([f[k]['mae'] for f in flat])
+            print(f"  {k:12s} R2 {np.nanmean(r2):.3f}+/-{np.nanstd(r2):.3f}  "
+                  f"MAE {np.nanmean(mae):.2f}+/-{np.nanstd(mae):.2f} ms")
+    else:
+        flat = np.array(all_seed_results).reshape(-1, 3)   # ← (n_seeds * n_participants, 3)
+        overall_mean = flat.mean(axis=0)
+        overall_std  = flat.std(axis=0)
+        print(f"\n{'='*60}")
+        print(f"Final results (mean ± std across {flat.shape[0]} participant-runs)")
 
     # ── Save summary to file ─────────────────────────────────────────────────
     os.makedirs("results", exist_ok=True)
