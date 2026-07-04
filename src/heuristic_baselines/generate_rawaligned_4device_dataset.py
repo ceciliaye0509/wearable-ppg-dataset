@@ -5,7 +5,7 @@
 # 与早期基于 5 分钟窗口的 v2 生成器不同，本版本的核心流程为：
 #   1. 从原始 PPG/ECG 时间序列出发；
 #   2. 在共享的绝对时间网格上切分窗口；
-#   3. 将四个 PPG 设备的两个通道统一重采样到 50 Hz；
+#   3. 将四个 PPG 设备的两个通道统一重采样到 target_fs Hz；
 #   4. 仅凭 PPG 采样覆盖率和 ECG 标签质控来决定窗口保留与否；
 #   5. PPG SQI、运动指标、PPG 波峰及 PPG-HRV 仅作为元数据；
 #   6. ECG R-peak 位置数组作为主要标签。
@@ -18,7 +18,7 @@ It follows the updated dataset definition:
 
   - start from raw PPG/ECG timelines;
   - cut windows on one shared absolute-time grid;
-  - resample all four PPG devices and both channels to a common 50 Hz grid;
+  - resample all four PPG devices and both channels to a common target_fs Hz grid;
   - include windows using only PPG sample coverage and ECG label QC;
   - keep PPG SQI, motion, PPG peaks, and PPG-derived HRV as metadata only;
   - use ECG R-peak location arrays as the primary label.
@@ -54,21 +54,21 @@ if str(_PKG_ROOT) not in sys.path:
 
 import config  # noqa: E402  # 项目级配置（路径、常量等）
 from algorithms import hrv  # noqa: E402  # HRV 相关算法（IBI 校正、RMSSD 等）
-from generate_synced_4device_dataset import (  # noqa: E402
-    CHANNELS,                              # PPG 通道列表（如 green、infrared）
-    DEFAULT_MAX_IBI_CORRECTION_RATIO,      # IBI 校正比例上限
-    DEFAULT_MAX_MOTION_FRACTION,           # 运动占比上限
-    DEFAULT_MAX_PPG_IBI_CORRECTION_RATIO,  # PPG IBI 校正比例上限
-    DEFAULT_MAX_RMSSD_MS,                  # RMSSD 上限（ms）
-    DEFAULT_MIN_PPG_SQI,                   # PPG 信号质量指数下限
-    DEVICES,                               # 四个 PPG 设备名称列表
-    _ppg_channel_qc,                       # 单通道 PPG 质控函数
-    _ppg_peaks_and_qc,                     # PPG 波峰检测与质控
-    _preprocess_for_peaks,                 # PPG 预处理（带通滤波等）
-    _resample_to_grid,                     # 将原始 PPG 重采样到统一时间网格
-    _simple_ecg_qrs_sqi,                   # ECG QRS 简单信号质量指数
-)
+from algorithms.sqa import ppg_sqi  # noqa: E402  # PPG 信号质量指数计算
+from preprocess import bandpass_filter  # noqa: E402  # 带通滤波
 from io_utils import normalize_participant_id  # noqa: E402  # 统一参与者 ID 格式
+
+# ---------------------------------------------------------------------------
+# 常量
+# ---------------------------------------------------------------------------
+CHANNELS: tuple[str, ...] = ("ppg_green", "ppg_ir")
+DEVICES: tuple[str, ...] = ("Earring", "Ring", "Watch")
+
+DEFAULT_MAX_IBI_CORRECTION_RATIO: float = 0.2 # ECG 每窗口纠正超过 20% 的 IBI → 标记 high_ecg_ibi_correction_ratio
+DEFAULT_MAX_MOTION_FRACTION: float = 0.5 # PPG 每窗口运动占比超过 50% → 标记 motion_artifact
+DEFAULT_MAX_PPG_IBI_CORRECTION_RATIO: float = 0.5 # PPG 每窗口纠正超过 50% 的 IBI → 标记 high_ppg_ibi_correction_ratio
+DEFAULT_MAX_RMSSD_MS: float = 200.0 # PPG 的 RMSSD 超过 200ms → 标记 ppg_rmssd_too_high
+DEFAULT_MIN_PPG_SQI: float = 0.4 # PPG 的 SQI 低于 0.4 → 标记 low_ppg_sqi
 
 # ---------------------------------------------------------------------------
 # NeuroKit2 导入检查
@@ -83,8 +83,260 @@ except ImportError as exc:  # pragma: no cover
 # 全局常量
 # ---------------------------------------------------------------------------
 RAW_ROOT = config.HEURISTIC_HF_SUBMISSION_ROOT / "raw_data"  # 原始数据根目录
-MAX_PEAKS_PER_WINDOW = 1200  # 每个窗口允许的最大 R-peak 数量（安全上限）
+MAX_PEAKS_PER_WINDOW = 1200  # 每个窗口允许的最大 R-peak 数量（人类心率的生理极限大约 220-240 bpm（极端运动或病理性心动过速）240 bpm × 5 min = 1200 次心跳）
 
+
+# ---------------------------------------------------------------------------
+# _resample_to_grid
+# ---------------------------------------------------------------------------
+def _resample_to_grid(
+    values: np.ndarray,
+    times_ms: np.ndarray,
+    grid_ms: np.ndarray,
+    *,
+    max_gap_ms: float,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """将不等间距的原始信号插值到等间距时间网格上。
+
+    返回 (resampled_signal, valid_mask, valid_ratio)。
+    如果离某个网格点最近的原始样本距离超过 *max_gap_ms* （500ms），
+    则该网格点被标记为无效（置零 + mask=False）。
+    """
+    sig = np.asarray(values, dtype=np.float64)
+    t = np.asarray(times_ms, dtype=np.float64)
+
+    # 只保留有限值
+    valid = np.isfinite(sig) & np.isfinite(t)
+    if valid.sum() < 2:
+        empty = np.zeros(len(grid_ms), dtype=np.float32)
+        return empty, np.zeros(len(grid_ms), dtype=bool), 0.0
+
+    t = t[valid]
+    sig = sig[valid]
+
+    # 按时间排序并去重
+    order = np.argsort(t)
+    t = t[order]
+    sig = sig[order]
+    unique = np.r_[True, np.diff(t) > 0]
+    t = t[unique]
+    sig = sig[unique]
+
+    if t.size < 2:
+        empty = np.zeros(len(grid_ms), dtype=np.float32)
+        return empty, np.zeros(len(grid_ms), dtype=bool), 0.0
+
+    # 线性插值到网格，超出原始数据时间范围的部分填 NaN
+    y = np.interp(grid_ms, t, sig, left=np.nan, right=np.nan)
+
+    # 对每个网格点，找最近的原始样本距离
+    nearest_idx = np.searchsorted(t, grid_ms)
+    left_idx = np.clip(nearest_idx - 1, 0, t.size - 1)
+    right_idx = np.clip(nearest_idx, 0, t.size - 1)
+    nearest_dist = np.minimum(
+        np.abs(grid_ms - t[left_idx]),
+        np.abs(grid_ms - t[right_idx]),
+    )
+
+    # 有效 = 插值结果有限 且 最近原始样本在 max_gap_ms 范围内
+    mask = np.isfinite(y) & (nearest_dist <= max_gap_ms)
+    valid_ratio = float(mask.mean()) if mask.size else 0.0
+
+    # 无效位置置零
+    y = np.where(mask, y, 0.0)
+
+    return y.astype(np.float32), mask.astype(bool), valid_ratio
+
+
+# ---------------------------------------------------------------------------
+# _preprocess_for_peaks
+# ---------------------------------------------------------------------------
+def _preprocess_for_peaks(
+    x_resampled: np.ndarray,
+    fs: float,
+    mode: str,
+) -> np.ndarray:
+    """PPG 波峰检测前的预处理。
+
+    mode='raw' 直接返回原始信号；
+    mode='bandpass' 做 0.7–3.5 Hz 带通滤波。
+    """
+    sig = np.asarray(x_resampled, dtype=np.float64)
+    if mode == "raw":
+        return sig
+    if mode == "bandpass":
+        return bandpass_filter(sig, 0.7, 3.5, fs)
+    raise ValueError(f"Unknown preprocess mode: {mode}")
+
+
+# ---------------------------------------------------------------------------
+# _ppg_peaks_and_qc
+# ---------------------------------------------------------------------------
+def _ppg_peaks_and_qc(
+    raw_resampled: np.ndarray,
+    peak_signal: np.ndarray,
+    *,
+    fs: float,
+    valid_sample_ratio: float,
+) -> dict[str, object]:
+    """PPG 波峰检测 + IBI/HRV 计算 + 信号质量评估。
+
+    返回包含波峰位置、IBI、RMSSD、SDNN、SQI 等指标的字典。
+    """
+    try:
+        peaks = hrv.detect_ppg_peaks(peak_signal, fs)
+    except Exception:
+        peaks = np.array([], dtype=np.int64)
+
+    peak_times = peaks.astype(np.float64) / fs * 1000.0 if peaks.size else np.array([], dtype=np.float64)
+    amps = raw_resampled[peaks].astype(np.float32) if peaks.size else np.array([], dtype=np.float32)
+
+    # IBI 计算
+    if peaks.size >= 2:
+        ibi = np.diff(peak_times).astype(np.float64)
+        valid_ibi = (ibi >= hrv.IBI_MIN_MS) & (ibi <= hrv.IBI_MAX_MS)
+        valid_ibi_ratio = float(valid_ibi.mean()) if ibi.size else 0.0
+        ibi_valid = ibi[valid_ibi]
+    else:
+        ibi = np.array([], dtype=np.float64)
+        ibi_valid = np.array([], dtype=np.float64)
+        valid_ibi_ratio = 0.0
+
+    # RMSSD / SDNN（需要至少 3 个有效 IBI）
+    if ibi_valid.size >= 3:
+        corrected, corr_ratio = hrv._correct_ibi_artifacts_with_ratio(ibi_valid)
+        diff = np.diff(corrected)
+        rmssd = float(np.sqrt(np.mean(diff ** 2))) if diff.size else float("nan")
+        sdnn = float(np.std(corrected, ddof=1)) if corrected.size > 1 else float("nan")
+    else:
+        corrected = np.array([], dtype=np.float64)
+        corr_ratio = float("nan")
+        rmssd = float("nan")
+        sdnn = float("nan")
+
+    # SQI
+    try:
+        sqi = float(ppg_sqi(peak_signal, fs, peaks))
+    except Exception:
+        sqi = float("nan")
+
+    return {
+        "ppg_peak_times_rel_ms": peak_times.astype(np.float32),
+        "ppg_peak_indices_grid": peaks.astype(np.int32),
+        "ppg_peak_amplitudes_raw": np.asarray(amps, dtype=np.float32),
+        "ppg_ibi_ms": ibi.astype(np.float32),
+        "ppg_ibi_corrected_ms": corrected.astype(np.float32),
+        "ppg_ibi_correction_ratio": corr_ratio,
+        "ppg_rmssd_ms": rmssd,
+        "ppg_sdnn_ms": sdnn,
+        "ppg_valid_sample_ratio": valid_sample_ratio,
+        "ppg_valid_ibi_ratio": valid_ibi_ratio,
+        "ppg_sqi": sqi,
+    }
+
+
+# ---------------------------------------------------------------------------
+# _ppg_channel_qc
+# ---------------------------------------------------------------------------
+def _ppg_channel_qc(
+    *,
+    valid_sample_ratio: float,
+    valid_ibi_ratio: float,
+    correction_ratio: float,
+    rmssd_ms: float,
+    sqi: float,
+    motion_fraction: float,
+    min_valid_sample_ratio: float,
+    min_valid_ibi_ratio: float,
+    min_sqi: float,
+    max_motion_fraction: float,
+) -> tuple[bool, str]:
+    """PPG 单通道质控：返回 (pass, reason)。"""
+    reasons: list[str] = []
+    if valid_sample_ratio < min_valid_sample_ratio:
+        reasons.append("low_ppg_sample_ratio")
+    if valid_ibi_ratio < min_valid_ibi_ratio:
+        reasons.append("low_ppg_valid_ibi_ratio")
+    if np.isfinite(correction_ratio) and correction_ratio > DEFAULT_MAX_PPG_IBI_CORRECTION_RATIO:
+        reasons.append("high_ppg_ibi_correction_ratio")
+    if np.isfinite(rmssd_ms) and rmssd_ms > DEFAULT_MAX_RMSSD_MS:
+        reasons.append("ppg_rmssd_too_high")
+    if not np.isfinite(sqi) or sqi < min_sqi:
+        reasons.append("low_ppg_sqi")
+    if motion_fraction >= max_motion_fraction:
+        reasons.append("motion_artifact")
+    if not np.isfinite(rmssd_ms):
+        reasons.append("invalid_ppg_hrv")
+
+    return (len(reasons) == 0, "ok" if not reasons else ";".join(reasons))
+
+
+# ---------------------------------------------------------------------------
+# _simple_ecg_qrs_sqi
+# ---------------------------------------------------------------------------
+def _simple_ecg_qrs_sqi(
+    ecg: np.ndarray,
+    r_samples: np.ndarray,
+    fs: float,
+) -> float:
+    """基于 QRS 突出度和一致性的简单 ECG 信号质量指数。
+
+    返回 0.0-1.0 的综合评分 (0.7SNR + 0.3×一致性)。
+    """
+    sig = np.asarray(ecg, dtype=np.float64)
+    samples = np.asarray(r_samples, dtype=np.int64)
+
+    # R-peak 不足 3 个或采样率无效时无法评估
+    if samples.size < 3 or not np.isfinite(fs) or fs <= 0:
+        return float("nan")
+
+    local_half = max(1, int(round(0.05 * fs)))   # QRS 局部窗口半宽（~50ms，覆盖一个 QRS 复合波）
+    noise_half = max(1, int(round(0.3 * fs)))     # 噪声估计窗口半宽（~300ms，覆盖 QRS 周围的背景信号）
+
+    # --- 对每个 R-peak 计算信噪比 ---
+    scores: list[float] = []
+    for s in samples:
+        # 大窗口（±300ms）：用于估计背景噪声水平
+        lo = max(0, int(s) - noise_half)
+        hi = min(sig.size, int(s) + noise_half + 1)
+        # 小窗口（±50ms）：只看 QRS 波本身
+        local_lo = max(0, int(s) - local_half)
+        local_hi = min(sig.size, int(s) + local_half + 1)
+
+        noise_win = sig[lo:hi]              # 背景噪声窗口
+        local_win = sig[local_lo:local_hi]  # QRS 局部窗口
+
+        if noise_win.size < 5 or local_win.size < 3:
+            continue
+
+        # 用中位数估计基线水平，MAD×1.4826 估计噪声标准差（比 std 更抗异常值）
+        # 对正态分布来说：MAD = median(|x - median(x)|) ≈ 0.6745 × σ，所以 σ ≈ MAD × (1 / 0.6745) = MAD × 1.4826
+        baseline = float(np.nanmedian(noise_win))
+        mad = float(np.nanmedian(np.abs(noise_win - baseline))) * 1.4826
+        # QRS 波相对于基线的最大偏移幅度
+        local_peak = float(np.nanmax(np.abs(local_win - baseline)))
+
+        if not np.isfinite(local_peak) or not np.isfinite(mad):
+            continue
+
+        # 信噪比 = QRS 波高度 / 噪声水平（越大说明 QRS 波越突出）
+        scores.append(local_peak / (mad + 1e-6))
+
+    if len(scores) < 3:
+        return float("nan")
+
+    # --- 综合所有 R-peak 的信噪比，计算最终评分 ---
+    scores_arr = np.asarray(scores, dtype=np.float64)
+    # SNR 分量：中位信噪比 / 10，截断到 [0, 1]（信噪比 ≥ 10 得满分）
+    snr_score = float(np.clip(np.nanmedian(scores_arr) / 10.0, 0.0, 1.0))
+    # 一致性分量：各 R-peak 信噪比的变异系数越小 → 一致性越高
+    consistency = 1.0 - float(np.clip(
+        np.nanstd(scores_arr) / (np.nanmean(scores_arr) + 1e-6),
+        0.0, 1.0,
+    ))
+
+    # 最终评分 = 70% 看信噪比够不够高 + 30% 看各心跳之间一不一致
+    return float(np.clip(0.7 * snr_score + 0.3 * consistency, 0.0, 1.0))
 
 # ---------------------------------------------------------------------------
 # 辅助函数：获取参与者 ID 列表
@@ -303,8 +555,8 @@ def _ecg_label_for_window(
             peak_amp.append(float(seg[int(p)]))
     # ★★ ECG 标签质控判断（重点）
     # 综合以下条件决定该窗口的 ECG 标签是否可信：
-    #   - ECG 有效样本覆盖率 >= 阈值
-    #   - 有效 IBI 比例 >= 阈值
+    #   - ECG 有效样本覆盖率 >= 阈值（0.95）
+    #   - 有效 IBI 比例 >= 阈值（1）
     #   - R-peak 数量足够（至少 3 个，且不低于基于最低心率计算的下限）
     #   - RMSSD 有限且不超标
     #   - IBI 校正比例不超标
@@ -341,7 +593,7 @@ def _ecg_label_for_window(
     # 返回完整的 ECG 标签和质控结果字典
     return {
         "ecg_r_peak_times_rel_ms": rel_ms.astype(np.float32),          # R-peak 相对时间（主标签）
-        "ecg_r_peak_indices_50hz": np.rint(rel_ms / 1000.0 * target_fs).astype(np.int32),  # 映射到 50Hz 网格的索引
+        "ecg_r_peak_indices_grid": np.rint(rel_ms / 1000.0 * target_fs).astype(np.int32),  # 映射到 target_fs 网格的索引
         "ecg_r_peak_amplitudes_raw": np.asarray(peak_amp, dtype=np.float32),  # R-peak 原始振幅
         "ecg_rr_intervals_ms": rr.astype(np.float32),                  # RR 间期
         "ecg_rr_intervals_corrected_ms": corrected.astype(np.float32), # 校正后 RR 间期
@@ -363,8 +615,8 @@ def _ecg_label_for_window(
 
 # ---------------------------------------------------------------------------
 # 辅助函数：从原始数据计算每个设备的运动检测阈值
-# 将加速度计数据按段切分，计算每段的加速度幅值标准差，
-# 然后取指定百分位数作为该设备的运动阈值
+# 将加速度计数据按段（seg_sec = 10s）切分，计算每段的加速度幅值标准差，
+# 然后取指定百分位数（第 75 百分位数）作为该设备的运动阈值
 # ---------------------------------------------------------------------------
 def _motion_thresholds_from_raw(
     ppg_raw: dict[str, dict[str, np.ndarray]],
@@ -452,7 +704,7 @@ A window is kept only if:
 1. all selected PPG devices have samples near the shared window start and end within
    `alignment_tolerance_sec`;
 2. every device/channel has `ppg_valid_sample_ratio >= min_valid_sample_ratio`
-   after 50 Hz resampling;
+   after target_fs Hz resampling;
 3. ECG label QC passes.
 
 PPG SQI, motion fraction, PPG peak quality, and PPG-derived HRV are metadata
@@ -463,15 +715,15 @@ only. They are not used to remove windows.
 - kept windows: {total}
 - participants with kept windows: {participants}
 - primary label: `ecg_r_peak_times_rel_ms`
-- model input: `ppg_50hz` with shape `(N, {n_devices}, 2, target_len)`
-- missing-sample mask: `ppg_valid_mask_50hz`
+- model input: `ppg_resampled` with shape `(N, {n_devices}, 2, target_len)`
+- missing-sample mask: `ppg_valid_mask_resampled`
 
 ## Important Fields
 
 | Field | Meaning |
 |---|---|
-| `ppg_50hz` | 4-device, 2-channel PPG resampled to the shared 50 Hz grid |
-| `ppg_valid_mask_50hz` | True where a resampled point is supported by nearby raw samples |
+| `ppg_resampled` | 4-device, 2-channel PPG resampled to the shared target_fs grid |
+| `ppg_valid_mask_resampled` | True where a resampled point is supported by nearby raw samples |
 | `ppg_valid_sample_ratio` | PPG sample coverage used for inclusion |
 | `ecg_r_peak_times_rel_ms` | primary label: ECG R-peak times relative to window start |
 | `ecg_rr_intervals_ms` | ECG RR intervals from Pan-Tompkins R-peaks |
@@ -525,7 +777,7 @@ def generate_participant(
     print(f"[{pid}] loading raw data")
     ppg_raw = _load_ppg_raw(raw_root, pid, devices)    # 加载四设备 PPG
     ecg_raw = _load_ecg_raw(raw_root, pid)              # 加载 ECG
-    target_len = int(round(window_sec * target_fs))     # 窗口在 50Hz 下的样本数
+    target_len = int(round(window_sec * target_fs))     # 窗口在 target_fs 下的样本数
     sample_step_ms = 1000.0 / target_fs                 # 每个样本间隔（ms）
     window_ms = window_sec * 1000.0
     tolerance_ms = alignment_tolerance_sec * 1000.0
@@ -661,7 +913,7 @@ def generate_participant(
     print(f"[{pid}] resampling PPG for {n_pre} ECG-valid windows")
     for out_i, wi in enumerate(prelim_idx):
         t0 = float(t0_all[wi])
-        grid_ms = t0 + np.arange(target_len, dtype=np.float64) * sample_step_ms  # 50Hz 时间网格
+        grid_ms = t0 + np.arange(target_len, dtype=np.float64) * sample_step_ms  # target_fs 时间网格
         for di, dev in enumerate(devices):
             # 计算该设备在此窗口的运动占比（元数据）
             motion_fraction[out_i, di] = _motion_fraction_window(
@@ -678,24 +930,24 @@ def generate_participant(
             seg_t = dev_t[seg_lo:seg_hi]
             for ci, ch in enumerate(CHANNELS):
                 seg_x = np.asarray(ppg_raw[dev][ch][seg_lo:seg_hi], dtype=np.float64)
-                # ★ 将原始 PPG 重采样到 50Hz 统一网格
-                raw_50, valid_mask, valid_ratio = _resample_to_grid(
+                # ★ 将原始 PPG 重采样到 target_fs 统一网格
+                resampled, valid_mask, valid_ratio = _resample_to_grid(
                     seg_x,
                     seg_t,
                     grid_ms,
                     max_gap_ms=max_source_gap_ms,
                 )
-                ppg[out_i, di, ci] = raw_50
+                ppg[out_i, di, ci] = resampled
                 ppg_valid_mask[out_i, di, ci] = valid_mask
                 ppg_valid_sample_ratio[out_i, di, ci] = valid_ratio
-                # ★ PPG 采样覆盖率检查：不达标则标记为丢弃
+                # ★ PPG 采样覆盖率检查：不达标则标记为丢弃（阈值 0.9）
                 if valid_ratio < min_valid_sample_ratio:
                     final_keep[out_i] = False
                 # PPG 波峰检测与 HRV 计算（仅作为元数据）
-                peak_signal = _preprocess_for_peaks(raw_50, target_fs, preprocess_mode)
-                peak_info = _ppg_peaks_and_qc(raw_50, peak_signal, fs=target_fs, valid_sample_ratio=valid_ratio)
+                peak_signal = _preprocess_for_peaks(resampled, target_fs, preprocess_mode)
+                peak_info = _ppg_peaks_and_qc(resampled, peak_signal, fs=target_fs, valid_sample_ratio=valid_ratio)
                 ppg_peak_times[out_i, di, ci] = peak_info["ppg_peak_times_rel_ms"]
-                ppg_peak_indices[out_i, di, ci] = peak_info["ppg_peak_indices_50hz"]
+                ppg_peak_indices[out_i, di, ci] = peak_info["ppg_peak_indices_grid"]
                 ppg_peak_amplitudes[out_i, di, ci] = peak_info["ppg_peak_amplitudes_raw"]
                 ppg_ibi[out_i, di, ci] = peak_info["ppg_ibi_ms"]
                 ppg_ibi_corrected[out_i, di, ci] = peak_info["ppg_ibi_corrected_ms"]
@@ -778,13 +1030,13 @@ def generate_participant(
         t1_ms=t1_all[kept_wi],
         max_start_diff_ms=np.asarray(max_start_diff_ms, dtype=np.float32)[kept_wi],
         max_end_diff_ms=np.asarray(max_end_diff_ms, dtype=np.float32)[kept_wi],
-        ppg_50hz=ppg[keep_idx],
-        ppg_valid_mask_50hz=ppg_valid_mask[keep_idx],
+        ppg_resampled=ppg[keep_idx],
+        ppg_valid_mask_resampled=ppg_valid_mask[keep_idx],
         ppg_valid_sample_ratio=ppg_valid_sample_ratio[keep_idx],
         ppg_valid_ibi_ratio=ppg_valid_ibi_ratio[keep_idx],
         ppg_sqi=ppg_sqi_arr[keep_idx],
         ppg_peak_times_rel_ms=ppg_peak_times[keep_idx],
-        ppg_peak_indices_50hz=ppg_peak_indices[keep_idx],
+        ppg_peak_indices_grid=ppg_peak_indices[keep_idx],
         ppg_peak_amplitudes_raw=ppg_peak_amplitudes[keep_idx],
         ppg_ibi_ms=ppg_ibi[keep_idx],
         ppg_ibi_corrected_ms=ppg_ibi_corrected[keep_idx],
@@ -796,7 +1048,7 @@ def generate_participant(
         motion_fraction=motion_fraction[keep_idx],
         motion_threshold=np.array([motion_threshold[d] for d in devices], dtype=np.float32),
         ecg_r_peak_times_rel_ms=np.array([x["ecg_r_peak_times_rel_ms"] for x in kept_labels], dtype=object),
-        ecg_r_peak_indices_50hz=np.array([x["ecg_r_peak_indices_50hz"] for x in kept_labels], dtype=object),
+        ecg_r_peak_indices_grid=np.array([x["ecg_r_peak_indices_grid"] for x in kept_labels], dtype=object),
         ecg_r_peak_amplitudes_raw=np.array([x["ecg_r_peak_amplitudes_raw"] for x in kept_labels], dtype=object),
         ecg_rr_intervals_ms=np.array([x["ecg_rr_intervals_ms"] for x in kept_labels], dtype=object),
         ecg_rr_intervals_corrected_ms=np.array([x["ecg_rr_intervals_corrected_ms"] for x in kept_labels], dtype=object),
@@ -876,7 +1128,7 @@ def main() -> None:
     ap.add_argument("--preprocess-mode", choices=("bandpass", "raw"), default="bandpass")  # 预处理模式
     ap.add_argument("--motion-seg-sec", type=float, default=10.0)           # 运动检测段长（秒）
     ap.add_argument("--motion-percentile", type=float, default=75.0)        # 运动阈值百分位数
-    ap.add_argument("--ecg-min-valid-ibi-ratio", type=float, default=0.80)  # ECG 最低有效 IBI 比
+    ap.add_argument("--ecg-min-valid-ibi-ratio", type=float, default=1.00)  # ECG 最低有效 IBI 比
     ap.add_argument("--min-ecg-valid-sample-ratio", type=float, default=0.95)  # ECG 最低有效采样比
     ap.add_argument("--min-hr-bpm", type=float, default=30.0)               # 最低心率 (BPM)
     ap.add_argument("--max-hr-bpm", type=float, default=200.0)              # 最高心率 (BPM)
