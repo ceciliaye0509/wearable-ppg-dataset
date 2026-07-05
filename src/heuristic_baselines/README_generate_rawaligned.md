@@ -57,7 +57,8 @@
 │   (b) 计算有效采样覆盖率                          │
 │   (c) PPG 波峰检测和 HRV 计算（仅作元数据）       │
 │   (d) PPG 单通道质控（仅作元数据）                │
-│   (e) 运动占比计算（仅作元数据）                  │
+│   (e) 加速度平均幅值计算（元数据）                              │
+│   ※ PPG 波峰、IBI、SQI 等在 baseline 评估时实时计算         │
 │   若任一设备/通道的采样覆盖率 < 阈值 → 标记丢弃   │
 └───────────────────────┬─────────────────────────┘
                         │
@@ -132,12 +133,11 @@
 | 最低心率 | `--min-hr-bpm` | 30.0 | 允许的最低心率（BPM） |
 | 最高心率 | `--max-hr-bpm` | 200.0 | 允许的最高心率（BPM） |
 
-### 运动检测参数（仅用于元数据）
+### 加速度计参数（仅用于元数据）
 
 | 参数 | 命令行选项 | 默认值 | 说明 |
 |---|---|---|---|
-| 运动段长 | `--motion-seg-sec` | 10.0 | 加速度计数据按此长度分段计算标准差 |
-| 运动阈值百分位 | `--motion-percentile` | 75.0 | 取所有段标准差的此百分位数作为运动阈值 |
+| 运动判定阈值 | （代码常量） | 0.1 | 平均加速度幅值超过此值标记 `motion_artifact` |
 
 ### 其他参数
 
@@ -173,13 +173,10 @@
 | `ecg_valid_ibi_ratio` | (N,) | 有效 IBI 比例 |
 | `ecg_qrs_sqi` | (N,) | QRS 信号质量指数 |
 | `ecg_hr_bpm` | (N,) | 心率（BPM） |
-| **PPG 元数据** | | |
-| `ppg_peak_times_rel_ms` | (N, D, 2) object | PPG 波峰时间（元数据） |
-| `ppg_ibi_ms` | (N, D, 2) object | PPG IBI（元数据） |
-| `ppg_rmssd_ms` | (N, D, 2) | PPG RMSSD（元数据） |
-| `ppg_sqi` | (N, D, 2) | PPG 信号质量指数（元数据） |
-| `ppg_quality_flag` | (N, D, 2) bool | PPG 质量标记（元数据） |
-| `motion_fraction` | (N, D) | 运动占比（元数据） |
+| **元数据** | | |
+| `accel_mean_mag` | (N, D) | 每窗口/设备的平均加速度幅值（元数据） |
+
+> PPG 波峰、IBI、RMSSD/SDNN、SQI、quality_flag 等不再存入数据集，而是在 baseline 评估时实时计算。
 
 > N = 窗口数，D = 设备数，L = target_len
 

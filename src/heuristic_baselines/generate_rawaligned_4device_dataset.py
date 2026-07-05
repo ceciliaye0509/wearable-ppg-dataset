@@ -65,10 +65,6 @@ CHANNELS: tuple[str, ...] = ("ppg_green", "ppg_ir")
 DEVICES: tuple[str, ...] = ("Earring", "Ring", "Watch")
 
 DEFAULT_MAX_IBI_CORRECTION_RATIO: float = 0.2 # ECG 每窗口纠正超过 20% 的 IBI → 标记 high_ecg_ibi_correction_ratio
-DEFAULT_MAX_MOTION_FRACTION: float = 0.5 # PPG 每窗口运动占比超过 50% → 标记 motion_artifact
-DEFAULT_MAX_PPG_IBI_CORRECTION_RATIO: float = 0.5 # PPG 每窗口纠正超过 50% 的 IBI → 标记 high_ppg_ibi_correction_ratio
-DEFAULT_MAX_RMSSD_MS: float = 200.0 # PPG 的 RMSSD 超过 200ms → 标记 ppg_rmssd_too_high
-DEFAULT_MIN_PPG_SQI: float = 0.4 # PPG 的 SQI 低于 0.4 → 标记 low_ppg_sqi
 
 # ---------------------------------------------------------------------------
 # NeuroKit2 导入检查
@@ -245,11 +241,11 @@ def _ppg_channel_qc(
     correction_ratio: float,
     rmssd_ms: float,
     sqi: float,
-    motion_fraction: float,
+    accel_mean_mag: float,
     min_valid_sample_ratio: float,
     min_valid_ibi_ratio: float,
     min_sqi: float,
-    max_motion_fraction: float,
+    max_accel_mean_mag: float,
 ) -> tuple[bool, str]:
     """PPG 单通道质控：返回 (pass, reason)。"""
     reasons: list[str] = []
@@ -263,7 +259,7 @@ def _ppg_channel_qc(
         reasons.append("ppg_rmssd_too_high")
     if not np.isfinite(sqi) or sqi < min_sqi:
         reasons.append("low_ppg_sqi")
-    if motion_fraction >= max_motion_fraction:
+    if accel_mean_mag >= max_accel_mean_mag:
         reasons.append("motion_artifact")
     if not np.isfinite(rmssd_ms):
         reasons.append("invalid_ppg_hrv")
@@ -555,7 +551,7 @@ def _ecg_label_for_window(
             peak_amp.append(float(seg[int(p)]))
     # ★★ ECG 标签质控判断（重点）
     # 综合以下条件决定该窗口的 ECG 标签是否可信：
-    #   - ECG 有效样本覆盖率 >= 阈值（0.95）
+    #   - ECG 有效样本覆盖率 >= 阈值（1.0）
     #   - 有效 IBI 比例 >= 阈值（1）
     #   - R-peak 数量足够（至少 3 个，且不低于基于最低心率计算的下限）
     #   - RMSSD 有限且不超标
@@ -614,68 +610,27 @@ def _ecg_label_for_window(
 
 
 # ---------------------------------------------------------------------------
-# 辅助函数：从原始数据计算每个设备的运动检测阈值
-# 将加速度计数据按段（seg_sec = 10s）切分，计算每段的加速度幅值标准差，
-# 然后取指定百分位数（第 75 百分位数）作为该设备的运动阈值
+# 辅助函数：计算单个窗口内某设备的平均加速度幅值
+# 对窗口内每个时间点，计算三轴加速度合成幅值 m_t = sqrt(x^2+y^2+z^2)，
+# 然后取窗口内所有时间点的平均值作为窗口级运动特征（仅作为元数据）
 # ---------------------------------------------------------------------------
-def _motion_thresholds_from_raw(
-    ppg_raw: dict[str, dict[str, np.ndarray]],
-    *,
-    percentile: float,
-    seg_sec: float,
-) -> dict[str, float]:
-    thresholds: dict[str, float] = {}
-    for dev, d in ppg_raw.items():
-        t = np.asarray(d["timestamp"], dtype=np.float64)
-        fs = _infer_fs_ms(t)
-        seg_n = max(1, int(round(seg_sec * fs))) if np.isfinite(fs) else 1000
-        # 计算三轴加速度的合成幅值
-        mag = np.sqrt(
-            np.asarray(d["accel_x"], dtype=np.float64) ** 2
-            + np.asarray(d["accel_y"], dtype=np.float64) ** 2
-            + np.asarray(d["accel_z"], dtype=np.float64) ** 2
-        )
-        # 按段计算标准差，然后取百分位数作为阈值
-        n_seg = mag.size // seg_n
-        if n_seg <= 0:
-            vals = np.array([np.nanstd(mag)], dtype=np.float64)
-        else:
-            vals = np.array([np.nanstd(mag[i * seg_n:(i + 1) * seg_n]) for i in range(n_seg)], dtype=np.float64)
-        thresholds[dev] = float(np.nanpercentile(vals, percentile)) if vals.size else float("nan")
-    return thresholds
-
-
-# ---------------------------------------------------------------------------
-# 辅助函数：计算单个窗口内某设备的运动占比
-# 将窗口内的加速度数据按段切分，计算每段的标准差是否超过阈值，
-# 返回超阈值段数的占比（仅作为元数据，不影响窗口保留决策）
-# ---------------------------------------------------------------------------
-def _motion_fraction_window(
+def _accel_mean_magnitude_window(
     dev_raw: dict[str, np.ndarray],
     *,
     t0: float,
     t1: float,
-    threshold: float,
-    seg_sec: float,
 ) -> float:
     t = np.asarray(dev_raw["timestamp"], dtype=np.float64)
     lo = int(np.searchsorted(t, t0, side="left"))
     hi = int(np.searchsorted(t, t1, side="right"))
     if hi <= lo:
         return float("nan")
-    fs = _infer_fs_ms(t[lo:hi])
-    seg_n = max(1, int(round(seg_sec * fs))) if np.isfinite(fs) else 1000
     mag = np.sqrt(
         np.asarray(dev_raw["accel_x"][lo:hi], dtype=np.float64) ** 2
         + np.asarray(dev_raw["accel_y"][lo:hi], dtype=np.float64) ** 2
         + np.asarray(dev_raw["accel_z"][lo:hi], dtype=np.float64) ** 2
     )
-    n_seg = mag.size // seg_n
-    if n_seg <= 0:
-        stds = np.array([np.nanstd(mag)], dtype=np.float64)
-    else:
-        stds = np.array([np.nanstd(mag[i * seg_n:(i + 1) * seg_n]) for i in range(n_seg)], dtype=np.float64)
-    return float(np.nanmean(stds > threshold)) if np.isfinite(threshold) else float("nan")
+    return float(np.nanmean(mag))
 
 
 # ---------------------------------------------------------------------------
@@ -732,7 +687,7 @@ only. They are not used to remove windows.
 | `ecg_qrs_sqi` | simple raw-ECG QRS prominence/consistency SQI |
 | `ppg_peak_times_rel_ms`, `ppg_ibi_ms`, `ppg_rmssd_ms` | PPG-derived metadata, not inclusion criteria |
 | `ppg_quality_flag`, `ppg_quality_reason` | metadata-only PPG quality indicators |
-| `motion_fraction` | metadata-only accelerometer motion fraction |
+| `accel_mean_mag` | metadata-only mean accelerometer magnitude per window/device |
 
 ## Summary
 
@@ -764,9 +719,8 @@ def generate_participant(
     alignment_tolerance_sec: float,
     min_valid_sample_ratio: float,
     max_source_gap_ms: float,
-    preprocess_mode: str,
-    motion_seg_sec: float,
-    motion_percentile: float,
+
+
     ecg_min_valid_ibi_ratio: float,
     min_ecg_valid_sample_ratio: float,
     min_hr_bpm: float,
@@ -811,15 +765,10 @@ def generate_participant(
         print(f"[SKIP] {pid}: no raw common overlap")
         return None
 
-    # --- 推断 ECG 采样率并计算运动阈值 ---
+    # --- 推断 ECG 采样率 ---
     ecg_fs = _ecg_fs_from_raw(ecg_raw)
     ecg_detector = "window_pantompkins1985"
     print(f"[{pid}] ECG fs={ecg_fs:.3f}, detector={ecg_detector}")
-    motion_threshold = _motion_thresholds_from_raw(
-        ppg_raw,
-        percentile=motion_percentile,
-        seg_sec=motion_seg_sec,
-    )
 
     # --- 第 3 步：★ 边界对齐检查 + ECG 质控筛选（重点） ---
     boundary_keep = []           # 每个窗口是否通过边界对齐
@@ -892,36 +841,20 @@ def generate_participant(
     ppg = np.zeros((n_pre, len(devices), len(CHANNELS), target_len), dtype=np.float32)
     ppg_valid_mask = np.zeros_like(ppg, dtype=bool)
     ppg_valid_sample_ratio = np.zeros((n_pre, len(devices), len(CHANNELS)), dtype=np.float32)
-    ppg_valid_ibi_ratio = np.zeros_like(ppg_valid_sample_ratio)
-    ppg_sqi_arr = np.zeros_like(ppg_valid_sample_ratio)
-    ppg_ibi_correction_ratio = np.full_like(ppg_valid_sample_ratio, np.nan)
-    ppg_rmssd = np.full_like(ppg_valid_sample_ratio, np.nan)
-    ppg_sdnn = np.full_like(ppg_valid_sample_ratio, np.nan)
-    ppg_quality_flag = np.zeros((n_pre, len(devices), len(CHANNELS)), dtype=bool)
-    ppg_quality_reason = np.empty((n_pre, len(devices), len(CHANNELS)), dtype=object)
-    motion_fraction = np.zeros((n_pre, len(devices)), dtype=np.float32)
+    accel_mean_mag = np.zeros((n_pre, len(devices)), dtype=np.float32)
 
-    # 变长数据用 object 数组存储（PPG 波峰、IBI 等）
-    ppg_peak_times = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
-    ppg_peak_indices = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
-    ppg_peak_amplitudes = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
-    ppg_ibi = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
-    ppg_ibi_corrected = _empty_object_array((n_pre, len(devices), len(CHANNELS)))
-
-    # --- 第 5 步：★★ PPG 重采样、波峰检测和质控（重点） ---
+    # --- 第 5 步：★★ PPG 重采样和采样覆盖率检查（重点） ---
     final_keep = np.ones(n_pre, dtype=bool)
     print(f"[{pid}] resampling PPG for {n_pre} ECG-valid windows")
     for out_i, wi in enumerate(prelim_idx):
         t0 = float(t0_all[wi])
         grid_ms = t0 + np.arange(target_len, dtype=np.float64) * sample_step_ms  # target_fs 时间网格
         for di, dev in enumerate(devices):
-            # 计算该设备在此窗口的运动占比（元数据）
-            motion_fraction[out_i, di] = _motion_fraction_window(
+            # 计算该设备在此窗口的平均加速度幅值（元数据）
+            accel_mean_mag[out_i, di] = _accel_mean_magnitude_window(
                 ppg_raw[dev],
                 t0=t0,
                 t1=float(t1_all[wi]),
-                threshold=motion_threshold[dev],
-                seg_sec=motion_seg_sec,
             )
             # 截取窗口附近的原始 PPG 数据（带边距容差）
             dev_t = np.asarray(ppg_raw[dev]["timestamp"], dtype=np.float64)
@@ -943,34 +876,6 @@ def generate_participant(
                 # ★ PPG 采样覆盖率检查：不达标则标记为丢弃（阈值 0.9）
                 if valid_ratio < min_valid_sample_ratio:
                     final_keep[out_i] = False
-                # PPG 波峰检测与 HRV 计算（仅作为元数据）
-                peak_signal = _preprocess_for_peaks(resampled, target_fs, preprocess_mode)
-                peak_info = _ppg_peaks_and_qc(resampled, peak_signal, fs=target_fs, valid_sample_ratio=valid_ratio)
-                ppg_peak_times[out_i, di, ci] = peak_info["ppg_peak_times_rel_ms"]
-                ppg_peak_indices[out_i, di, ci] = peak_info["ppg_peak_indices_grid"]
-                ppg_peak_amplitudes[out_i, di, ci] = peak_info["ppg_peak_amplitudes_raw"]
-                ppg_ibi[out_i, di, ci] = peak_info["ppg_ibi_ms"]
-                ppg_ibi_corrected[out_i, di, ci] = peak_info["ppg_ibi_corrected_ms"]
-                ppg_ibi_correction_ratio[out_i, di, ci] = peak_info["ppg_ibi_correction_ratio"]
-                ppg_rmssd[out_i, di, ci] = peak_info["ppg_rmssd_ms"]
-                ppg_sdnn[out_i, di, ci] = peak_info["ppg_sdnn_ms"]
-                ppg_valid_ibi_ratio[out_i, di, ci] = peak_info["ppg_valid_ibi_ratio"]
-                ppg_sqi_arr[out_i, di, ci] = peak_info["ppg_sqi"]
-                # PPG 单通道质控（元数据，不影响窗口保留）
-                qflag, qreason = _ppg_channel_qc(
-                    valid_sample_ratio=valid_ratio,
-                    valid_ibi_ratio=peak_info["ppg_valid_ibi_ratio"],
-                    correction_ratio=peak_info["ppg_ibi_correction_ratio"],
-                    rmssd_ms=peak_info["ppg_rmssd_ms"],
-                    sqi=peak_info["ppg_sqi"],
-                    motion_fraction=float(motion_fraction[out_i, di]),
-                    min_valid_sample_ratio=min_valid_sample_ratio,
-                    min_valid_ibi_ratio=ecg_min_valid_ibi_ratio,
-                    min_sqi=DEFAULT_MIN_PPG_SQI,
-                    max_motion_fraction=DEFAULT_MAX_MOTION_FRACTION,
-                )
-                ppg_quality_flag[out_i, di, ci] = qflag
-                ppg_quality_reason[out_i, di, ci] = qreason
 
     # --- 第 6 步：最终筛选 ---
     # 仅保留所有设备/通道的 PPG 采样覆盖率均达标的窗口
@@ -1008,16 +913,14 @@ def generate_participant(
         "alignment_tolerance_sec": alignment_tolerance_sec,
         "min_valid_sample_ratio": min_valid_sample_ratio,
         "max_source_gap_ms": max_source_gap_ms,
-        "preprocess_mode_for_peak_metadata": preprocess_mode,
-        "motion_seg_sec": motion_seg_sec,
-        "motion_percentile": motion_percentile,
+
+
         "ecg_detector": "window_neurokit2_pantompkins1985",
         "ecg_fs_inferred_hz": ecg_fs,
         "ecg_min_valid_ibi_ratio": ecg_min_valid_ibi_ratio,
         "min_ecg_valid_sample_ratio": min_ecg_valid_sample_ratio,
         "primary_label": "ecg_r_peak_times_rel_ms",
         "inclusion_rule": "raw_boundary_aligned && ecg_label_qc_pass && ppg_valid_sample_ratio>=min_valid_sample_ratio for all device/channel",
-        "ppg_quality_is_metadata_only": True,
     }
     print(f"[{pid}] saving {out_path} kept={keep_idx.size}/{t0_all.size}")
     np.savez_compressed(
@@ -1033,20 +936,7 @@ def generate_participant(
         ppg_resampled=ppg[keep_idx],
         ppg_valid_mask_resampled=ppg_valid_mask[keep_idx],
         ppg_valid_sample_ratio=ppg_valid_sample_ratio[keep_idx],
-        ppg_valid_ibi_ratio=ppg_valid_ibi_ratio[keep_idx],
-        ppg_sqi=ppg_sqi_arr[keep_idx],
-        ppg_peak_times_rel_ms=ppg_peak_times[keep_idx],
-        ppg_peak_indices_grid=ppg_peak_indices[keep_idx],
-        ppg_peak_amplitudes_raw=ppg_peak_amplitudes[keep_idx],
-        ppg_ibi_ms=ppg_ibi[keep_idx],
-        ppg_ibi_corrected_ms=ppg_ibi_corrected[keep_idx],
-        ppg_ibi_correction_ratio=ppg_ibi_correction_ratio[keep_idx],
-        ppg_rmssd_ms=ppg_rmssd[keep_idx],
-        ppg_sdnn_ms=ppg_sdnn[keep_idx],
-        ppg_quality_flag=ppg_quality_flag[keep_idx],
-        ppg_quality_reason=ppg_quality_reason[keep_idx],
-        motion_fraction=motion_fraction[keep_idx],
-        motion_threshold=np.array([motion_threshold[d] for d in devices], dtype=np.float32),
+        accel_mean_mag=accel_mean_mag[keep_idx],
         ecg_r_peak_times_rel_ms=np.array([x["ecg_r_peak_times_rel_ms"] for x in kept_labels], dtype=object),
         ecg_r_peak_indices_grid=np.array([x["ecg_r_peak_indices_grid"] for x in kept_labels], dtype=object),
         ecg_r_peak_amplitudes_raw=np.array([x["ecg_r_peak_amplitudes_raw"] for x in kept_labels], dtype=object),
@@ -1087,9 +977,7 @@ def generate_participant(
         "mean_max_start_diff_ms": float(np.nanmean(np.asarray(max_start_diff_ms)[kept_wi])),
         "mean_max_end_diff_ms": float(np.nanmean(np.asarray(max_end_diff_ms)[kept_wi])),
         "mean_ppg_valid_sample_ratio": float(np.nanmean(ppg_valid_sample_ratio[keep_idx])),
-        "mean_ppg_sqi": float(np.nanmean(ppg_sqi_arr[keep_idx])),
-        "mean_ppg_ibi_correction_ratio": float(np.nanmean(ppg_ibi_correction_ratio[keep_idx])),
-        "mean_motion_fraction": float(np.nanmean(motion_fraction[keep_idx])),
+        "mean_accel_mean_mag": float(np.nanmean(accel_mean_mag[keep_idx])),
         "mean_ecg_valid_ibi_ratio": float(np.nanmean([x["ecg_valid_ibi_ratio"] for x in kept_labels])),
         "mean_ecg_ibi_correction_ratio": float(np.nanmean([x["ecg_ibi_correction_ratio"] for x in kept_labels])),
         "mean_ecg_qrs_sqi": float(np.nanmean([x["ecg_qrs_sqi"] for x in kept_labels])),
@@ -1125,11 +1013,9 @@ def main() -> None:
     ap.add_argument("--alignment-tolerance-sec", type=float, default=2.0)   # 边界对齐容差（秒）
     ap.add_argument("--min-valid-sample-ratio", type=float, default=0.50)   # PPG 最低有效采样比
     ap.add_argument("--max-source-gap-ms", type=float, default=500.0)       # 重采样最大源间隔 (ms)
-    ap.add_argument("--preprocess-mode", choices=("bandpass", "raw"), default="bandpass")  # 预处理模式
-    ap.add_argument("--motion-seg-sec", type=float, default=10.0)           # 运动检测段长（秒）
-    ap.add_argument("--motion-percentile", type=float, default=75.0)        # 运动阈值百分位数
+
     ap.add_argument("--ecg-min-valid-ibi-ratio", type=float, default=1.00)  # ECG 最低有效 IBI 比
-    ap.add_argument("--min-ecg-valid-sample-ratio", type=float, default=0.95)  # ECG 最低有效采样比
+    ap.add_argument("--min-ecg-valid-sample-ratio", type=float, default=1.0)  # ECG 最低有效采样比
     ap.add_argument("--min-hr-bpm", type=float, default=30.0)               # 最低心率 (BPM)
     ap.add_argument("--max-hr-bpm", type=float, default=200.0)              # 最高心率 (BPM)
     ap.add_argument("--max-windows", type=int, default=None)                # 调试用：最大窗口数
@@ -1162,9 +1048,8 @@ def main() -> None:
         "alignment_tolerance_sec": args.alignment_tolerance_sec,
         "min_valid_sample_ratio": args.min_valid_sample_ratio,
         "max_source_gap_ms": args.max_source_gap_ms,
-        "preprocess_mode": args.preprocess_mode,
-        "motion_seg_sec": args.motion_seg_sec,
-        "motion_percentile": args.motion_percentile,
+
+
         "ecg_detector": "window_neurokit2_pantompkins1985",
         "ecg_min_valid_ibi_ratio": args.ecg_min_valid_ibi_ratio,
         "min_ecg_valid_sample_ratio": args.min_ecg_valid_sample_ratio,
@@ -1179,6 +1064,12 @@ def main() -> None:
     print(f"[rawaligned] out_dir={out_dir}")
     paths = []
     for pid in participants:
+        # 断点续跑：跳过已完成的参与者
+        out_path = out_dir / f"{args.dataset_name}_{pid}.npz"
+        if out_path.exists():
+            paths.append(out_path)
+            print(f"[SKIP] {pid}: already exists, skipping")
+            continue
         try:
             path = generate_participant(
                 pid,
@@ -1192,9 +1083,8 @@ def main() -> None:
                 alignment_tolerance_sec=args.alignment_tolerance_sec,
                 min_valid_sample_ratio=args.min_valid_sample_ratio,
                 max_source_gap_ms=args.max_source_gap_ms,
-                preprocess_mode=args.preprocess_mode,
-                motion_seg_sec=args.motion_seg_sec,
-                motion_percentile=args.motion_percentile,
+
+
                 ecg_min_valid_ibi_ratio=args.ecg_min_valid_ibi_ratio,
                 min_ecg_valid_sample_ratio=args.min_ecg_valid_sample_ratio,
                 min_hr_bpm=args.min_hr_bpm,
