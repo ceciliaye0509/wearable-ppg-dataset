@@ -157,12 +157,12 @@
 | 字段 | 形状 | 说明 |
 |---|---|---|
 | **PPG 数据** | | |
-| `ppg_50hz` | (N, D, 2, L) | 重采样后的 PPG 信号（字段名沿用历史，实际采样率由 `target_fs` 决定） |
-| `ppg_valid_mask_50hz` | (N, D, 2, L) | 每个重采样点是否由附近原始样本支持 |
+| `ppg_resampled` | (N, D, 2, L) | 重采样后的 PPG 信号（采样率由 `target_fs` 决定） |
+| `ppg_valid_mask_resampled` | (N, D, 2, L) | 每个重采样点是否由附近原始样本支持 |
 | `ppg_valid_sample_ratio` | (N, D, 2) | 每设备/通道的有效样本覆盖率 |
 | **ECG 主标签** | | |
 | `ecg_r_peak_times_rel_ms` | (N,) object | R-peak 相对于窗口起点的时间（毫秒），**主标签** |
-| `ecg_r_peak_indices_50hz` | (N,) object | R-peak 映射到采样网格的索引 |
+| `ecg_r_peak_indices_grid` | (N,) object | R-peak 映射到采样网格的索引 |
 | `ecg_rr_intervals_ms` | (N,) object | RR 间期（毫秒） |
 | `ecg_rr_intervals_corrected_ms` | (N,) object | 校正后 RR 间期 |
 | `ecg_rmssd_ms` | (N,) | RMSSD（毫秒） |
@@ -204,15 +204,15 @@
   --stride-sec 300
 ```
 
-### 3 设备 100Hz、ECG IBI 100%、sample 90%（训练用，stride=60）
+### 3 设备 100Hz、ECG IBI 100%、sample 90%（训练用，stride=30）
 
 ```bash
 /Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python \
   src/heuristic_baselines/generate_rawaligned_4device_dataset.py \
-  --dataset-name synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90 \
+  --dataset-name synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_stride30 \
   --devices Earring,Ring,Watch \
   --target-fs 100.0 \
-  --stride-sec 60 \
+  --stride-sec 30 \
   --min-valid-sample-ratio 0.90 \
   --ecg-min-valid-ibi-ratio 1.0
 ```
@@ -242,6 +242,7 @@
 | `synced_3device_rawaligned_strict_reference_100hz_ecgibi100_sample90` | 3 设备 | 100 Hz | 300s | 0.90 | 1.00 | 1718 |
 | `synced_3device_rawaligned_training_v1_100hz_ecgibi100` | 3 设备 | 100 Hz | 60s | 0.50 | 1.00 | — |
 | `synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90` | 3 设备 | 100 Hz | 60s | 0.90 | 1.00 | 8608 |
+| `synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_stride30` | 3 设备 | 100 Hz | 30s | 0.90 | 1.00 | — |
 
 ---
 
@@ -250,4 +251,4 @@
 - Python 3.10+
 - NumPy, Pandas, SciPy
 - NeuroKit2（ECG R-peak 检测）
-- 项目内部模块：`config`, `algorithms.hrv`, `generate_synced_4device_dataset`, `io_utils`
+- 项目内部模块：`config`, `algorithms.hrv`, `algorithms.sqa`, `preprocess`, `io_utils`
