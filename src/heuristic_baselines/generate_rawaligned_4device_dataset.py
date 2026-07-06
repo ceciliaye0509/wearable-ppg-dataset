@@ -7,8 +7,10 @@
 #   2. 在共享的绝对时间网格上切分窗口；
 #   3. 将四个 PPG 设备的两个通道统一重采样到 target_fs Hz；
 #   4. 仅凭 PPG 采样覆盖率和 ECG 标签质控来决定窗口保留与否；
-#   5. PPG SQI、运动指标、PPG 波峰及 PPG-HRV 仅作为元数据；
+#   5. 保存每个窗口、每个设备的平均加速度幅值，作为 motion 特征；
 #   6. ECG R-peak 位置数组作为主要标签。
+# PPG peak / IBI / SQI / PPG-derived HRV 不写入数据集；这些 baseline
+# 派生信息应在 baseline 代码中按算法版本重新计算。
 # ===========================================================================
 """
 Generate raw-timeline aligned 4-device PPG dataset with ECG R-peak labels.
@@ -20,8 +22,12 @@ It follows the updated dataset definition:
   - cut windows on one shared absolute-time grid;
   - resample all four PPG devices and both channels to a common target_fs Hz grid;
   - include windows using only PPG sample coverage and ECG label QC;
-  - keep PPG SQI, motion, PPG peaks, and PPG-derived HRV as metadata only;
+  - store per-device window-level accelerometer mean magnitude for motion-aware models;
   - use ECG R-peak location arrays as the primary label.
+
+PPG peaks, PPG-derived IBI/HRV, SQI, and quality flags are intentionally not
+stored in this dataset. They are baseline-derived artifacts and should be
+computed by baseline/evaluation code.
 
 Run with the project venv so SciPy and NeuroKit2 are available, e.g.
 
@@ -54,8 +60,6 @@ if str(_PKG_ROOT) not in sys.path:
 
 import config  # noqa: E402  # 项目级配置（路径、常量等）
 from algorithms import hrv  # noqa: E402  # HRV 相关算法（IBI 校正、RMSSD 等）
-from algorithms.sqa import ppg_sqi  # noqa: E402  # PPG 信号质量指数计算
-from preprocess import bandpass_filter  # noqa: E402  # 带通滤波
 from io_utils import normalize_participant_id  # noqa: E402  # 统一参与者 ID 格式
 
 # ---------------------------------------------------------------------------
@@ -65,6 +69,7 @@ CHANNELS: tuple[str, ...] = ("ppg_green", "ppg_ir")
 DEVICES: tuple[str, ...] = ("Earring", "Ring", "Watch")
 
 DEFAULT_MAX_IBI_CORRECTION_RATIO: float = 0.2 # ECG 每窗口纠正超过 20% 的 IBI → 标记 high_ecg_ibi_correction_ratio
+DEFAULT_MAX_RMSSD_MS: float = 200.0 # ECG RMSSD 超过 200ms → 标记 ecg_rmssd_too_high
 
 # ---------------------------------------------------------------------------
 # NeuroKit2 导入检查
@@ -142,129 +147,6 @@ def _resample_to_grid(
     y = np.where(mask, y, 0.0)
 
     return y.astype(np.float32), mask.astype(bool), valid_ratio
-
-
-# ---------------------------------------------------------------------------
-# _preprocess_for_peaks
-# ---------------------------------------------------------------------------
-def _preprocess_for_peaks(
-    x_resampled: np.ndarray,
-    fs: float,
-    mode: str,
-) -> np.ndarray:
-    """PPG 波峰检测前的预处理。
-
-    mode='raw' 直接返回原始信号；
-    mode='bandpass' 做 0.7–3.5 Hz 带通滤波。
-    """
-    sig = np.asarray(x_resampled, dtype=np.float64)
-    if mode == "raw":
-        return sig
-    if mode == "bandpass":
-        return bandpass_filter(sig, 0.7, 3.5, fs)
-    raise ValueError(f"Unknown preprocess mode: {mode}")
-
-
-# ---------------------------------------------------------------------------
-# _ppg_peaks_and_qc
-# ---------------------------------------------------------------------------
-def _ppg_peaks_and_qc(
-    raw_resampled: np.ndarray,
-    peak_signal: np.ndarray,
-    *,
-    fs: float,
-    valid_sample_ratio: float,
-) -> dict[str, object]:
-    """PPG 波峰检测 + IBI/HRV 计算 + 信号质量评估。
-
-    返回包含波峰位置、IBI、RMSSD、SDNN、SQI 等指标的字典。
-    """
-    try:
-        peaks = hrv.detect_ppg_peaks(peak_signal, fs)
-    except Exception:
-        peaks = np.array([], dtype=np.int64)
-
-    peak_times = peaks.astype(np.float64) / fs * 1000.0 if peaks.size else np.array([], dtype=np.float64)
-    amps = raw_resampled[peaks].astype(np.float32) if peaks.size else np.array([], dtype=np.float32)
-
-    # IBI 计算
-    if peaks.size >= 2:
-        ibi = np.diff(peak_times).astype(np.float64)
-        valid_ibi = (ibi >= hrv.IBI_MIN_MS) & (ibi <= hrv.IBI_MAX_MS)
-        valid_ibi_ratio = float(valid_ibi.mean()) if ibi.size else 0.0
-        ibi_valid = ibi[valid_ibi]
-    else:
-        ibi = np.array([], dtype=np.float64)
-        ibi_valid = np.array([], dtype=np.float64)
-        valid_ibi_ratio = 0.0
-
-    # RMSSD / SDNN（需要至少 3 个有效 IBI）
-    if ibi_valid.size >= 3:
-        corrected, corr_ratio = hrv._correct_ibi_artifacts_with_ratio(ibi_valid)
-        diff = np.diff(corrected)
-        rmssd = float(np.sqrt(np.mean(diff ** 2))) if diff.size else float("nan")
-        sdnn = float(np.std(corrected, ddof=1)) if corrected.size > 1 else float("nan")
-    else:
-        corrected = np.array([], dtype=np.float64)
-        corr_ratio = float("nan")
-        rmssd = float("nan")
-        sdnn = float("nan")
-
-    # SQI
-    try:
-        sqi = float(ppg_sqi(peak_signal, fs, peaks))
-    except Exception:
-        sqi = float("nan")
-
-    return {
-        "ppg_peak_times_rel_ms": peak_times.astype(np.float32),
-        "ppg_peak_indices_grid": peaks.astype(np.int32),
-        "ppg_peak_amplitudes_raw": np.asarray(amps, dtype=np.float32),
-        "ppg_ibi_ms": ibi.astype(np.float32),
-        "ppg_ibi_corrected_ms": corrected.astype(np.float32),
-        "ppg_ibi_correction_ratio": corr_ratio,
-        "ppg_rmssd_ms": rmssd,
-        "ppg_sdnn_ms": sdnn,
-        "ppg_valid_sample_ratio": valid_sample_ratio,
-        "ppg_valid_ibi_ratio": valid_ibi_ratio,
-        "ppg_sqi": sqi,
-    }
-
-
-# ---------------------------------------------------------------------------
-# _ppg_channel_qc
-# ---------------------------------------------------------------------------
-def _ppg_channel_qc(
-    *,
-    valid_sample_ratio: float,
-    valid_ibi_ratio: float,
-    correction_ratio: float,
-    rmssd_ms: float,
-    sqi: float,
-    accel_mean_mag: float,
-    min_valid_sample_ratio: float,
-    min_valid_ibi_ratio: float,
-    min_sqi: float,
-    max_accel_mean_mag: float,
-) -> tuple[bool, str]:
-    """PPG 单通道质控：返回 (pass, reason)。"""
-    reasons: list[str] = []
-    if valid_sample_ratio < min_valid_sample_ratio:
-        reasons.append("low_ppg_sample_ratio")
-    if valid_ibi_ratio < min_valid_ibi_ratio:
-        reasons.append("low_ppg_valid_ibi_ratio")
-    if np.isfinite(correction_ratio) and correction_ratio > DEFAULT_MAX_PPG_IBI_CORRECTION_RATIO:
-        reasons.append("high_ppg_ibi_correction_ratio")
-    if np.isfinite(rmssd_ms) and rmssd_ms > DEFAULT_MAX_RMSSD_MS:
-        reasons.append("ppg_rmssd_too_high")
-    if not np.isfinite(sqi) or sqi < min_sqi:
-        reasons.append("low_ppg_sqi")
-    if accel_mean_mag >= max_accel_mean_mag:
-        reasons.append("motion_artifact")
-    if not np.isfinite(rmssd_ms):
-        reasons.append("invalid_ppg_hrv")
-
-    return (len(reasons) == 0, "ok" if not reasons else ";".join(reasons))
 
 
 # ---------------------------------------------------------------------------
@@ -662,8 +544,9 @@ A window is kept only if:
    after target_fs Hz resampling;
 3. ECG label QC passes.
 
-PPG SQI, motion fraction, PPG peak quality, and PPG-derived HRV are metadata
-only. They are not used to remove windows.
+PPG peak detection, PPG-derived HRV, SQI, and PPG quality flags are not stored
+in this dataset. They are baseline-derived artifacts and should be computed by
+baseline/evaluation code.
 
 ## Current Output
 
@@ -677,17 +560,16 @@ only. They are not used to remove windows.
 
 | Field | Meaning |
 |---|---|
-| `ppg_resampled` | 4-device, 2-channel PPG resampled to the shared target_fs grid |
+| `ppg_resampled` | selected-device, 2-channel raw PPG resampled to the shared target_fs grid |
 | `ppg_valid_mask_resampled` | True where a resampled point is supported by nearby raw samples |
 | `ppg_valid_sample_ratio` | PPG sample coverage used for inclusion |
+| `accel_mean_mag` | per-window, per-device mean accelerometer magnitude |
 | `ecg_r_peak_times_rel_ms` | primary label: ECG R-peak times relative to window start |
 | `ecg_rr_intervals_ms` | ECG RR intervals from Pan-Tompkins R-peaks |
 | `ecg_rmssd_ms`, `ecg_sdnn_ms` | ECG-derived HRV labels from corrected RR intervals |
 | `ecg_label_qc_pass`, `ecg_label_qc_reason` | final ECG label trustworthiness flag/reason |
 | `ecg_qrs_sqi` | simple raw-ECG QRS prominence/consistency SQI |
-| `ppg_peak_times_rel_ms`, `ppg_ibi_ms`, `ppg_rmssd_ms` | PPG-derived metadata, not inclusion criteria |
-| `ppg_quality_flag`, `ppg_quality_reason` | metadata-only PPG quality indicators |
-| `accel_mean_mag` | metadata-only mean accelerometer magnitude per window/device |
+| `accel_mean_mag` | mean accelerometer magnitude per window/device |
 
 ## Summary
 
@@ -702,7 +584,7 @@ See `{dataset_name}_summary.csv` for per-participant counts and quality means.
 # 对单个参与者执行完整的数据集生成流程：
 #   1. 加载原始 PPG + ECG 数据
 #   2. 生成候选窗口并按边界对齐和 ECG 质控筛选
-#   3. 对通过初筛的窗口进行 PPG 重采样和 PPG 波峰检测
+#   3. 对通过初筛的窗口进行 PPG 重采样，并计算 per-device motion 均值
 #   4. 按 PPG 采样覆盖率做最终筛选
 #   5. 保存结果为 .npz 文件并输出汇总 CSV
 # ---------------------------------------------------------------------------
@@ -843,7 +725,7 @@ def generate_participant(
     ppg_valid_sample_ratio = np.zeros((n_pre, len(devices), len(CHANNELS)), dtype=np.float32)
     accel_mean_mag = np.zeros((n_pre, len(devices)), dtype=np.float32)
 
-    # --- 第 5 步：★★ PPG 重采样和采样覆盖率检查（重点） ---
+    # --- 第 5 步：★★ PPG 重采样、motion 均值和 PPG 采样覆盖率检查（重点） ---
     final_keep = np.ones(n_pre, dtype=bool)
     print(f"[{pid}] resampling PPG for {n_pre} ECG-valid windows")
     for out_i, wi in enumerate(prelim_idx):
@@ -921,6 +803,7 @@ def generate_participant(
         "min_ecg_valid_sample_ratio": min_ecg_valid_sample_ratio,
         "primary_label": "ecg_r_peak_times_rel_ms",
         "inclusion_rule": "raw_boundary_aligned && ecg_label_qc_pass && ppg_valid_sample_ratio>=min_valid_sample_ratio for all device/channel",
+        "ppg_derived_metadata_in_dataset": False,
     }
     print(f"[{pid}] saving {out_path} kept={keep_idx.size}/{t0_all.size}")
     np.savez_compressed(
@@ -1041,6 +924,7 @@ def main() -> None:
         "participants": participants,
         "excluded": sorted(excluded),
         "devices": devices,
+        "channels": list(CHANNELS),
         "window_sec": args.window_sec,
         "stride_sec": args.stride_sec,
         "target_fs": args.target_fs,
@@ -1054,6 +938,7 @@ def main() -> None:
         "ecg_min_valid_ibi_ratio": args.ecg_min_valid_ibi_ratio,
         "min_ecg_valid_sample_ratio": args.min_ecg_valid_sample_ratio,
         "primary_label": "ecg_r_peak_times_rel_ms",
+        "ppg_derived_metadata_in_dataset": False,
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "config.json").write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
