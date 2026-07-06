@@ -283,6 +283,14 @@ def _empty_object_array(shape: tuple[int, ...]) -> np.ndarray:
     return arr
 
 
+def _object_array_cast(items: list[np.ndarray], dtype: np.dtype | type) -> np.ndarray:
+    """Store ragged per-window arrays compactly while preserving object layout."""
+    out = np.empty(len(items), dtype=object)
+    for i, item in enumerate(items):
+        out[i] = np.asarray(item, dtype=dtype)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # ★ 辅助函数：计算窗口边界偏移量（重点）
 # 给定一段时间戳和窗口 [t0, t1]，计算该设备在窗口起止处的偏移距离。
@@ -492,10 +500,25 @@ def _ecg_label_for_window(
 
 
 # ---------------------------------------------------------------------------
-# 辅助函数：计算单个窗口内某设备的平均加速度幅值
+# 辅助函数：计算单个窗口内某设备的平均加速度幅值和去重力 motion 幅值
 # 对窗口内每个时间点，计算三轴加速度合成幅值 m_t = sqrt(x^2+y^2+z^2)，
-# 然后取窗口内所有时间点的平均值作为窗口级运动特征（仅作为元数据）
+# `accel_mean_mag` 保留 raw magnitude；`accel_motion_mean_mag` 使用
+# mean(abs(m_t - gravity_reference)) 作为去重力后的窗口级 motion feature。
 # ---------------------------------------------------------------------------
+def _accel_gravity_reference(dev_raw: dict[str, np.ndarray]) -> float:
+    mag = np.sqrt(
+        np.asarray(dev_raw["accel_x"], dtype=np.float64) ** 2
+        + np.asarray(dev_raw["accel_y"], dtype=np.float64) ** 2
+        + np.asarray(dev_raw["accel_z"], dtype=np.float64) ** 2
+    )
+    med = float(np.nanmedian(mag))
+    if 7.0 <= med <= 12.5:
+        return 9.80665
+    if 0.7 <= med <= 1.3:
+        return 1.0
+    return med
+
+
 def _accel_mean_magnitude_window(
     dev_raw: dict[str, np.ndarray],
     *,
@@ -513,6 +536,26 @@ def _accel_mean_magnitude_window(
         + np.asarray(dev_raw["accel_z"][lo:hi], dtype=np.float64) ** 2
     )
     return float(np.nanmean(mag))
+
+
+def _accel_motion_mean_magnitude_window(
+    dev_raw: dict[str, np.ndarray],
+    *,
+    t0: float,
+    t1: float,
+    gravity_reference: float,
+) -> float:
+    t = np.asarray(dev_raw["timestamp"], dtype=np.float64)
+    lo = int(np.searchsorted(t, t0, side="left"))
+    hi = int(np.searchsorted(t, t1, side="right"))
+    if hi <= lo:
+        return float("nan")
+    mag = np.sqrt(
+        np.asarray(dev_raw["accel_x"][lo:hi], dtype=np.float64) ** 2
+        + np.asarray(dev_raw["accel_y"][lo:hi], dtype=np.float64) ** 2
+        + np.asarray(dev_raw["accel_z"][lo:hi], dtype=np.float64) ** 2
+    )
+    return float(np.nanmean(np.abs(mag - gravity_reference)))
 
 
 # ---------------------------------------------------------------------------
@@ -724,6 +767,11 @@ def generate_participant(
     ppg_valid_mask = np.zeros_like(ppg, dtype=bool)
     ppg_valid_sample_ratio = np.zeros((n_pre, len(devices), len(CHANNELS)), dtype=np.float32)
     accel_mean_mag = np.zeros((n_pre, len(devices)), dtype=np.float32)
+    accel_motion_mean_mag = np.zeros((n_pre, len(devices)), dtype=np.float32)
+    accel_gravity_reference = {
+        dev: _accel_gravity_reference(ppg_raw[dev])
+        for dev in devices
+    }
 
     # --- 第 5 步：★★ PPG 重采样、motion 均值和 PPG 采样覆盖率检查（重点） ---
     final_keep = np.ones(n_pre, dtype=bool)
@@ -737,6 +785,12 @@ def generate_participant(
                 ppg_raw[dev],
                 t0=t0,
                 t1=float(t1_all[wi]),
+            )
+            accel_motion_mean_mag[out_i, di] = _accel_motion_mean_magnitude_window(
+                ppg_raw[dev],
+                t0=t0,
+                t1=float(t1_all[wi]),
+                gravity_reference=accel_gravity_reference[dev],
             )
             # 截取窗口附近的原始 PPG 数据（带边距容差）
             dev_t = np.asarray(ppg_raw[dev]["timestamp"], dtype=np.float64)
@@ -804,6 +858,9 @@ def generate_participant(
         "primary_label": "ecg_r_peak_times_rel_ms",
         "inclusion_rule": "raw_boundary_aligned && ecg_label_qc_pass && ppg_valid_sample_ratio>=min_valid_sample_ratio for all device/channel",
         "ppg_derived_metadata_in_dataset": False,
+        "accel_motion_feature": "accel_motion_mean_mag = mean(abs(sqrt(accel_x^2+accel_y^2+accel_z^2) - gravity_reference))",
+        "accel_gravity_reference_by_device": accel_gravity_reference,
+        "accel_gravity_reference_rule": "median magnitude 7-12.5 -> 9.80665; 0.7-1.3 -> 1.0; otherwise per-file median magnitude",
     }
     print(f"[{pid}] saving {out_path} kept={keep_idx.size}/{t0_all.size}")
     np.savez_compressed(
@@ -816,15 +873,16 @@ def generate_participant(
         t1_ms=t1_all[kept_wi],
         max_start_diff_ms=np.asarray(max_start_diff_ms, dtype=np.float32)[kept_wi],
         max_end_diff_ms=np.asarray(max_end_diff_ms, dtype=np.float32)[kept_wi],
-        ppg_resampled=ppg[keep_idx],
-        ppg_valid_mask_resampled=ppg_valid_mask[keep_idx],
-        ppg_valid_sample_ratio=ppg_valid_sample_ratio[keep_idx],
-        accel_mean_mag=accel_mean_mag[keep_idx],
-        ecg_r_peak_times_rel_ms=np.array([x["ecg_r_peak_times_rel_ms"] for x in kept_labels], dtype=object),
-        ecg_r_peak_indices_grid=np.array([x["ecg_r_peak_indices_grid"] for x in kept_labels], dtype=object),
-        ecg_r_peak_amplitudes_raw=np.array([x["ecg_r_peak_amplitudes_raw"] for x in kept_labels], dtype=object),
-        ecg_rr_intervals_ms=np.array([x["ecg_rr_intervals_ms"] for x in kept_labels], dtype=object),
-        ecg_rr_intervals_corrected_ms=np.array([x["ecg_rr_intervals_corrected_ms"] for x in kept_labels], dtype=object),
+        ppg_resampled=ppg[keep_idx].astype(np.float32, copy=False),
+        ppg_valid_mask_resampled=ppg_valid_mask[keep_idx].astype(bool, copy=False),
+        ppg_valid_sample_ratio=ppg_valid_sample_ratio[keep_idx].astype(np.float32, copy=False),
+        accel_mean_mag=accel_mean_mag[keep_idx].astype(np.float32, copy=False),
+        accel_motion_mean_mag=accel_motion_mean_mag[keep_idx].astype(np.float32, copy=False),
+        ecg_r_peak_times_rel_ms=_object_array_cast([x["ecg_r_peak_times_rel_ms"] for x in kept_labels], np.float32),
+        ecg_r_peak_indices_grid=_object_array_cast([x["ecg_r_peak_indices_grid"] for x in kept_labels], np.int32),
+        ecg_r_peak_amplitudes_raw=_object_array_cast([x["ecg_r_peak_amplitudes_raw"] for x in kept_labels], np.float32),
+        ecg_rr_intervals_ms=_object_array_cast([x["ecg_rr_intervals_ms"] for x in kept_labels], np.float32),
+        ecg_rr_intervals_corrected_ms=_object_array_cast([x["ecg_rr_intervals_corrected_ms"] for x in kept_labels], np.float32),
         ecg_rmssd_ms=np.array([x["ecg_rmssd_ms"] for x in kept_labels], dtype=np.float32),
         ecg_sdnn_ms=np.array([x["ecg_sdnn_ms"] for x in kept_labels], dtype=np.float32),
         ecg_valid_sample_ratio=np.array([x["ecg_valid_sample_ratio"] for x in kept_labels], dtype=np.float32),
@@ -861,6 +919,7 @@ def generate_participant(
         "mean_max_end_diff_ms": float(np.nanmean(np.asarray(max_end_diff_ms)[kept_wi])),
         "mean_ppg_valid_sample_ratio": float(np.nanmean(ppg_valid_sample_ratio[keep_idx])),
         "mean_accel_mean_mag": float(np.nanmean(accel_mean_mag[keep_idx])),
+        "mean_accel_motion_mean_mag": float(np.nanmean(accel_motion_mean_mag[keep_idx])),
         "mean_ecg_valid_ibi_ratio": float(np.nanmean([x["ecg_valid_ibi_ratio"] for x in kept_labels])),
         "mean_ecg_ibi_correction_ratio": float(np.nanmean([x["ecg_ibi_correction_ratio"] for x in kept_labels])),
         "mean_ecg_qrs_sqi": float(np.nanmean([x["ecg_qrs_sqi"] for x in kept_labels])),
