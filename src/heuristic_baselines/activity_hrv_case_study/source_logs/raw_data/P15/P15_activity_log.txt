@@ -1,0 +1,34 @@
+Unix Timestamp, Local Time yyyy-mm-dd hh:mm:ss, Activity
+1774632997259, 2026-03-27 10:36:37, start walking
+1774633021542, 2026-03-27 10:37:01, end walking
+1774633524532, 2026-03-27 10:45:24, start walking
+1774633794933, 2026-03-27 10:49:54, end walking
+1774638368763, 2026-03-27 12:06:08, start walking
+1774638872557, 2026-03-27 12:14:32, end walking
+1774656703218, 2026-03-27 17:11:43, feeling anxious
+1774657752328, 2026-03-27 17:29:12, start eating
+1774658383572, 2026-03-27 17:39:43, end eating
+1774660210623, 2026-03-27 18:10:10, Feeling less anxious
+1774660721082, 2026-03-27 18:18:41, start watching tv
+1774668134006, 2026-03-27 20:22:14, end watching tv
+1774670580604, 2026-03-27 21:03:00, start talking with my partner, ~5 min ago
+1774673369081, 2026-03-27 21:49:29, end talking
+1774798370373, 2026-03-29 08:32:50, Start driving
+1774802847657, 2026-03-29 09:47:27, start playing with my dogs
+1774804324680, 2026-03-29 10:12:04, I have a bad headache, it started when I woke up around 8am but I wasn't wearing the devices then
+1774804342757, 2026-03-29 10:12:22, end playing with the dogs
+1774806526067, 2026-03-29 10:48:46, I was tidying up the house for the last 30min
+1774806536464, 2026-03-29 10:48:56, headache feels a bit better now
+1774806568900, 2026-03-29 10:49:28, I'm feeling anxious and have leg pain
+1774810034882, 2026-03-29 11:47:14, just been laying down on the couch scrolling for the last ~30 min. Leg pain feels a bit better
+1774817768996, 2026-03-29 13:56:08, start eating two boiled eggs warm
+1774818174396, 2026-03-29 14:02:54, end eating
+1774818742776, 2026-03-29 14:12:22, start watching tv
+1774821580359, 2026-03-29 14:59:40, end watching tv
+1774824159758, 2026-03-29 15:42:39, start driving to meet friends
+1774830619333, 2026-03-29 17:30:19, stopped driving at 4pm
+1774830640676, 2026-03-29 17:30:40, had ice cream and have talked to friends from 4:05-5:30pm
+1774843853813, 2026-03-29 21:10:53, walked my dog for about 20min. 8:50pm-9:10pm. cold outside.
+1774843880152, 2026-03-29 21:11:20, I have a headache again
+1774845166920, 2026-03-29 21:32:46, start eating. Thai fried rice with noodles, mildy spice and hot temperature
+1774846030972, 2026-03-29 21:47:10, end eating

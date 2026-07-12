@@ -1,0 +1,223 @@
+Unix Timestamp, Local Time yyyy-mm-dd hh:mm:ss, Activity
+1774984547373, 2026-03-31 12:15:47, sitting and chatting
+1774985071016, 2026-03-31 12:24:31, stopped sitting and chatting
+1774985100193, 2026-03-31 12:25:00, start walking
+1774985964032, 2026-03-31 12:39:24, stop walking
+1774985985482, 2026-03-31 12:39:45, enter light rail
+1774986035578, 2026-03-31 12:40:35, sitting on light rail
+1774986451769, 2026-03-31 12:47:31, end sitting
+1774986475586, 2026-03-31 12:47:55, exited the light rail
+1774986784274, 2026-03-31 12:53:04, start walking
+1774986790571, 2026-03-31 12:53:10, start driving
+1774988277624, 2026-03-31 13:17:57, stop driving
+1774988367630, 2026-03-31 13:19:27, start walk on treadmill
+1774988630389, 2026-03-31 13:23:50, stop walking
+1774988649593, 2026-03-31 13:24:09, start running on treadmill
+1774990382908, 2026-03-31 13:53:02, stopped running
+1774990395232, 2026-03-31 13:53:15, start walking on treadmill on incline walk
+1774990426549, 2026-03-31 13:53:46, start drinking water
+1774990454368, 2026-03-31 13:54:14, stop drinking water
+1774992147759, 2026-03-31 14:22:27, stop incline walk
+1774992325502, 2026-03-31 14:25:25, start drive
+1774995419819, 2026-03-31 15:16:59, stop drivign
+1774995755265, 2026-03-31 15:22:35, start sit
+1774996830854, 2026-03-31 15:40:30, stop sitting down
+1774996837861, 2026-03-31 15:40:37, start laying on couch
+1775002511495, 2026-03-31 17:15:11, stop sitting
+1775005384512, 2026-03-31 18:03:04, start driving
+1775005978887, 2026-03-31 18:12:58, listening /lip syncing to music
+1775006833222, 2026-03-31 18:27:13, stop listening /lip syncing to music
+1775006838457, 2026-03-31 18:27:18, stop driving
+1775007039848, 2026-03-31 18:30:39, seated at restaurant table
+1775008549944, 2026-03-31 18:55:49, start talking
+1775008866724, 2026-03-31 19:01:06, start eating hot ramen soup
+1775010609345, 2026-03-31 19:30:09, stopped eating ramen and sitting
+1775010623100, 2026-03-31 19:30:23, started walking
+1775010891329, 2026-03-31 19:34:51, stopped walking
+1775010896672, 2026-03-31 19:34:56, started sitting
+1775010907167, 2026-03-31 19:35:07, started eating a cinnamon roll
+1775011257244, 2026-03-31 19:40:57, stopped sitting and eating
+1775011554205, 2026-03-31 19:45:54, stop walking
+1775011561348, 2026-03-31 19:46:01, start sitting
+1775014556807, 2026-03-31 20:35:56, start driving
+1775015612333, 2026-03-31 20:53:32, stop driving
+1775015683423, 2026-03-31 20:54:43, stop sitting
+1775015688740, 2026-03-31 20:54:48, start walking
+1775015834990, 2026-03-31 20:57:14, stop walking
+1775015843319, 2026-03-31 20:57:23, start sitting on couch
+1775015873546, 2026-03-31 20:57:53, start drinking water
+1775015894425, 2026-03-31 20:58:14, stop drinking water
+1775015990919, 2026-03-31 20:59:50, starting chatting
+1775016053284, 2026-03-31 21:00:53, start petting dog
+1775016163356, 2026-03-31 21:02:43, stop petting dog
+1775016812096, 2026-03-31 21:13:32, stop chatting
+1775018404039, 2026-03-31 21:40:04, start drinking water
+1775018464728, 2026-03-31 21:41:04, stop drinking water
+1775018892472, 2026-03-31 21:48:12, start peeling tangerine
+1775018956034, 2026-03-31 21:49:16, stop peeling tangerine
+1775018966240, 2026-03-31 21:49:26, start eating tangerine
+1775019004367, 2026-03-31 21:50:04, stop eating tangerine
+1775019193296, 2026-03-31 21:53:13, start laying on couch
+1775020398056, 2026-03-31 22:13:18, stop laying on couch
+1775020412309, 2026-03-31 22:13:32, start walking
+1775020426826, 2026-03-31 22:13:46, stop walking
+1775020437836, 2026-03-31 22:13:57, start taking down hair out of ponytail
+1775020489696, 2026-03-31 22:14:49, start messaging hair
+1775020546515, 2026-03-31 22:15:46, stop messaging hair
+1775020560820, 2026-03-31 22:16:00, start putting hair in loose bun
+1775020596415, 2026-03-31 22:16:36, stop putting hair in loose bun
+1775020623401, 2026-03-31 22:17:03, start changing into pajamas
+1775020724228, 2026-03-31 22:18:44, stop putting on pajamas
+1775020776250, 2026-03-31 22:19:36, start sitting in bed
+1775020831220, 2026-03-31 22:20:31, start watching YouTube video
+1775020851207, 2026-03-31 22:20:51, start working on laptop
+1775038355080, 2026-04-01 03:12:35, stop watching YouTube
+1775038363437, 2026-04-01 03:12:43, stop working on laptop
+1775038440011, 2026-04-01 03:14:00, stop sitting in bed
+1775069685274, 2026-04-01 11:54:45, start driving
+1775069795176, 2026-04-01 11:56:35, start listening to music
+1775071595583, 2026-04-01 12:26:35, stop driving
+1775071657333, 2026-04-01 12:27:37, start walking
+1775071805587, 2026-04-01 12:30:05, stop walking
+1775071816074, 2026-04-01 12:30:16, start incline walk on treadmill
+1775071852100, 2026-04-01 12:30:52, stop driving
+1775071858280, 2026-04-01 12:30:58, stop listening to mysic
+1775072424419, 2026-04-01 12:40:24, start watching youtube
+1775073694415, 2026-04-01 13:01:34, start drinking water
+1775073717728, 2026-04-01 13:01:57, stop drinking water
+1775075526658, 2026-04-01 13:32:06, stop watching youtueb
+1775075532107, 2026-04-01 13:32:12, stop incline walk
+1775083539201, 2026-04-01 15:45:39, start sitting on couch
+1775083546296, 2026-04-01 15:45:46, start working on laptop
+1775086038009, 2026-04-01 16:27:18, start talking on facetime
+1775087223688, 2026-04-01 16:47:03, stop talking on phone
+1775087230323, 2026-04-01 16:47:10, stop sitting on couch
+1775087234977, 2026-04-01 16:47:14, start walking
+1775087263381, 2026-04-01 16:47:43, start warming up lunch
+1775087993845, 2026-04-01 16:59:53, stop walking
+1775088005764, 2026-04-01 17:00:05, stop warming up food
+1775088011269, 2026-04-01 17:00:11, start sitting on couch
+1775088017091, 2026-04-01 17:00:17, start drinking water
+1775088048474, 2026-04-01 17:00:48, stop drinking water
+1775088199574, 2026-04-01 17:03:19, start joining Zoom call on laptop
+1775088216665, 2026-04-01 17:03:36, start eating Mac and cheese and stir fried vegetables
+1775089270703, 2026-04-01 17:21:10, stop eating
+1775089277871, 2026-04-01 17:21:17, start drinking water
+1775089306770, 2026-04-01 17:21:46, stop drinking water
+1775090465953, 2026-04-01 17:41:05, stop zoom meeting
+1775090472656, 2026-04-01 17:41:12, start working on laptop
+1775096194133, 2026-04-01 19:16:34, stop sitting on couch
+1775096200939, 2026-04-01 19:16:40, start laying on couch
+1775096208241, 2026-04-01 19:16:48, stop working on laptop
+1775096323948, 2026-04-01 19:18:43, start scrolling on phone watching YouTube reels
+1775098163209, 2026-04-01 19:49:23, stop laying on couch
+1775098174236, 2026-04-01 19:49:34, stop scrolling YouTube reels
+1775098179126, 2026-04-01 19:49:39, start walking
+1775098443682, 2026-04-01 19:54:03, stop walking
+1775098455245, 2026-04-01 19:54:15, start sitting on couch upright
+1775098468238, 2026-04-01 19:54:28, start drinking water
+1775098493075, 2026-04-01 19:54:53, stop drinking cold water
+1775098518667, 2026-04-01 19:55:18, start watching tv
+1775098653859, 2026-04-01 19:57:33, start chatting with mom
+1775098908338, 2026-04-01 20:01:48, start feeling happy
+1775099490412, 2026-04-01 20:11:30, stop chatting
+1775100138852, 2026-04-01 20:22:18, start eating paneer Tikka masala (spicy) vegetable samosa and rice temperature hot
+1775100175742, 2026-04-01 20:22:55, start sitting up on couch
+1775100221449, 2026-04-01 20:23:41, start drinking cold water
+1775100250721, 2026-04-01 20:24:10, stop drinking water
+1775100483516, 2026-04-01 20:28:03, stopped eatting
+1775100494988, 2026-04-01 20:28:14, feeling started stomach hurts
+1775106090094, 2026-04-01 22:01:30, start feeling uncomfortable experiencing some stomach aching
+1775106361995, 2026-04-01 22:06:01, start yoga/breathing exercises
+1775106827534, 2026-04-01 22:13:47, stop yoga/breathing exercises
+1775106948508, 2026-04-01 22:15:48, start laying on floor
+1775106964626, 2026-04-01 22:16:04, start watching YouTube on iphone
+1775109732142, 2026-04-01 23:02:12, stop laying on floor
+1775109737787, 2026-04-01 23:02:17, stop watching youtube
+1775109743271, 2026-04-01 23:02:23, start walking
+1775109766225, 2026-04-01 23:02:46, start flossing teeth
+1775109886887, 2026-04-01 23:04:46, start brushing teeth
+1775110106132, 2026-04-01 23:08:26, stop flossing
+1775110111333, 2026-04-01 23:08:31, stop brushing teeth
+1775110118729, 2026-04-01 23:08:38, start skincare routine
+1775110410466, 2026-04-01 23:13:30, stop skincare routine
+1775110415286, 2026-04-01 23:13:35, stop walking
+1775110420912, 2026-04-01 23:13:40, start laying in bed
+1775110428600, 2026-04-01 23:13:48, start watching YouTube on laptop
+1775113792005, 2026-04-02 00:09:52, start talking on facetime
+1775114860795, 2026-04-02 00:27:40, stop talking on facetine
+1775115912943, 2026-04-02 00:45:12, stop watching YouTube
+1775143652410, 2026-04-02 08:27:32, start laying in bed
+1775148899463, 2026-04-02 09:54:59, start phone call
+1775149824984, 2026-04-02 10:10:24, stop talking on phone
+1775150413446, 2026-04-02 10:20:13, stop laying in bed
+1775150419977, 2026-04-02 10:20:19, start walking
+1775150428275, 2026-04-02 10:20:28, start putting clothes in washing machine
+1775151377302, 2026-04-02 10:36:17, stop putting clothes in washer
+1775151695934, 2026-04-02 10:41:35, start cooking in kitchen (avocado toast + fried egg)
+1775152280897, 2026-04-02 10:51:20, stop walking
+1775152289063, 2026-04-02 10:51:29, start sitting on chair in dining room
+1775152295351, 2026-04-02 10:51:35, stop cooking
+1775152309731, 2026-04-02 10:51:49, start eating fried egg and toast
+1775152314996, 2026-04-02 10:51:54, start drinking water
+1775152336367, 2026-04-02 10:52:16, start watching YouTube on laptop
+1775152810012, 2026-04-02 11:00:10, stop eating
+1775152889987, 2026-04-02 11:01:29, stop drinking water
+1775154266803, 2026-04-02 11:24:26, start laying on couch
+1775193832554, 2026-04-02 22:23:52, start laying on floor
+1775193838309, 2026-04-02 22:23:58, start watching youtube
+1775193952339, 2026-04-02 22:25:52, start scrolling on phone
+1775194349920, 2026-04-02 22:32:29, stop watching YouTube and laying on couch around 12:00pm (forgot to record earlier)
+1775195302015, 2026-04-02 22:48:22, stop laying on floor
+1775195307854, 2026-04-02 22:48:27, stop watching YouTube
+1775195316080, 2026-04-02 22:48:36, start taking clothes out of dryer
+1775195582752, 2026-04-02 22:53:02, stop taking clothes out dryer
+1775195613330, 2026-04-02 22:53:33, start adding another load of clothes to dryer
+1775195926312, 2026-04-02 22:58:46, stop putting clothes in dryer
+1775195934659, 2026-04-02 22:58:54, start folding laundry
+1775196783856, 2026-04-02 23:13:03, stop folding laundry
+1775196790365, 2026-04-02 23:13:10, start putting laundry away
+1775197298695, 2026-04-02 23:21:38, stop putting laundry away
+1775197308216, 2026-04-02 23:21:48, start drinking room temp water
+1775197378111, 2026-04-02 23:22:58, start laying in bed
+1775198282472, 2026-04-02 23:38:02, start talking on phone
+1775199015934, 2026-04-02 23:50:15, start flossing and brushing teeth
+1775199039385, 2026-04-02 23:50:39, stop laying in bed about 2 min ago
+1775199316685, 2026-04-02 23:55:16, stop brushing and flossing
+1775199324940, 2026-04-02 23:55:24, start skincare routine
+1775199774586, 2026-04-03 00:02:54, stop skincare routine
+1775199782054, 2026-04-03 00:03:02, start laying in bed
+1775250762751, 2026-04-03 14:12:42, stop skincare routine @ about 12am
+1775250912809, 2026-04-03 14:15:12, start laying in bed
+1775250943495, 2026-04-03 14:15:43, start scrolling through phone
+1775252106544, 2026-04-03 14:35:06, stop scrolling through phone
+1775252112181, 2026-04-03 14:35:12, start working on laptop
+1775253348761, 2026-04-03 14:55:48, stop working on laptop
+1775259048310, 2026-04-03 16:30:48, started napping at about 3:30 pm
+1775259068705, 2026-04-03 16:31:08, ended nap around 4:15pm
+1775259077878, 2026-04-03 16:31:17, start scrolling on phone
+1775260419792, 2026-04-03 16:53:39, stop laying down
+1775260428238, 2026-04-03 16:53:48, start drinking cold water
+1775260641966, 2026-04-03 16:57:21, start eating paneer Tikka masala, sweet potatos, veggie samosa (warm)
+1775260653078, 2026-04-03 16:57:33, start sitting
+1775260671624, 2026-04-03 16:57:51, start watching YouTube on laptop
+1775261283479, 2026-04-03 17:08:03, stop eating
+1775261402014, 2026-04-03 17:10:02, stop drinking water
+1775261407240, 2026-04-03 17:10:07, start sitting on bed
+1775261447142, 2026-04-03 17:10:47, stop sitting on chair(forgot to log) about 2 min ago
+1775261456806, 2026-04-03 17:10:56, start sitting on bed
+1775261774298, 2026-04-03 17:16:14, stop sitting on bed
+1775261785604, 2026-04-03 17:16:25, start laying on bed
+1775262697467, 2026-04-03 17:31:37, start working on laptop
+1775266525838, 2026-04-03 18:35:25, stop laying in bed
+1775266617550, 2026-04-03 18:36:57, start getting dressed
+1775266949392, 2026-04-03 18:42:29, stop getting dressed
+1775266955013, 2026-04-03 18:42:35, start doing hair
+1775272106717, 2026-04-03 20:08:26, stopped doing hair around 6:55
+1775272127299, 2026-04-03 20:08:47, start walking
+1775272512535, 2026-04-03 20:15:12, stop walking
+1775272524337, 2026-04-03 20:15:24, start incline walk on treadmill
+1775272777762, 2026-04-03 20:19:37, start scrolling on phone
+1775274328397, 2026-04-03 20:45:28, start drinking room temp water
+1775274635631, 2026-04-03 20:50:35, stop drinking water
+1775276121174, 2026-04-03 21:15:21, stop incline walk
