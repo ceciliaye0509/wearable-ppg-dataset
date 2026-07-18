@@ -30,9 +30,12 @@ except ModuleNotFoundError:
 
 
 # 默认读取已经生成好的三设备共同窗口 stride30 数据集。
-DEFAULT_DATASET_DIR = Path(
-    "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/outputs/"
-    "synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_ecgsample100_stride30"
+THIS_DIR = Path(__file__).resolve().parent
+HEURISTIC_DIR = THIS_DIR.parent
+DEFAULT_DATASET_DIR = (
+    HEURISTIC_DIR
+    / "outputs"
+    / "synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_ecgsample100_stride30"
 )
 DEFAULT_LOG_DIR = Path(__file__).resolve().parent / "source_logs" / "raw_data"
 DEFAULT_PLOT_BREAK_GAP_MIN = 5.0

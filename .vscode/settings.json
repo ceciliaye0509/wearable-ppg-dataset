@@ -1,0 +1,6 @@
+{
+  "python.defaultInterpreterPath": "/Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/src"
+  ]
+}

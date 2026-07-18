@@ -1,4 +1,9 @@
 """
+历史探索脚本：旧版完整消融实验矩阵 v2。
+
+本脚本已归档，不属于正式 v1-primary unified heuristic baseline 主流程。
+它保留 4-device / Necklace 时代的 step-matrix 消融逻辑，只用于历史追溯。
+
 完整消融实验矩阵 v2 — 包含所有改进步骤的组合测试。
 
 与 v1 相比的变化：
@@ -10,7 +15,7 @@
   6. 多进程：4 个设备并行处理
 
 使用方法：
-    python full_step_matrix_v2.py --participant P7
+    python legacy_full_step_matrix_v2.py --participant P7
 """
 import argparse
 import sys
@@ -26,7 +31,9 @@ from scipy.stats import pearsonr
 # ---------------------------------------------------------------------------
 # 包路径设置与导入
 # ---------------------------------------------------------------------------
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+ARCHIVE_ROOT = Path(__file__).resolve().parent
+HEURISTIC_ROOT = ARCHIVE_ROOT.parents[1]
+sys.path.insert(0, str(HEURISTIC_ROOT))
 from algorithms import hrv
 from preprocess import preprocess_ppg
 from io_utils import merged_windows_npz, normalize_participant_id

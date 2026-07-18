@@ -4,7 +4,7 @@
 
 这份 README 对应当前脚本：
 
-`/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/generate_rawaligned_4device_dataset.py`
+`/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/prepare_windowed_dataset/generate_rawaligned_4device_dataset.py`
 
 当前脚本的真实行为是：
 
@@ -277,7 +277,7 @@ stride 60 数据集在 Hugging Face 上保留，本地副本之前已删除以�
 
 ```bash
 /Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python \
-  /Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/generate_rawaligned_4device_dataset.py \
+  /Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/prepare_windowed_dataset/generate_rawaligned_4device_dataset.py \
   --dataset-name synced_3device_rawaligned_strict_reference_100hz_ecgibi100_sample90_ecgsample100 \
   --raw-root /path/to/Multisite-PPG/raw_data \
   --devices Earring,Ring,Watch \
@@ -293,7 +293,7 @@ stride 60 数据集在 Hugging Face 上保留，本地副本之前已删除以�
 
 ```bash
 /Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python \
-  /Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/generate_rawaligned_4device_dataset.py \
+  /Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/prepare_windowed_dataset/generate_rawaligned_4device_dataset.py \
   --dataset-name synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_ecgsample100 \
   --raw-root /path/to/Multisite-PPG/raw_data \
   --devices Earring,Ring,Watch \
@@ -309,7 +309,7 @@ stride 60 数据集在 Hugging Face 上保留，本地副本之前已删除以�
 
 ```bash
 /Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python \
-  /Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/generate_rawaligned_4device_dataset.py \
+  /Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/prepare_windowed_dataset/generate_rawaligned_4device_dataset.py \
   --dataset-name synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_ecgsample100_stride30 \
   --raw-root /path/to/Multisite-PPG/raw_data \
   --devices Earring,Ring,Watch \
@@ -326,7 +326,7 @@ stride 60 数据集在 Hugging Face 上保留，本地副本之前已删除以�
 ## 注意事项
 
 1. 当前脚本名仍叫 `generate_rawaligned_4device_dataset.py`，但当前 `DEVICES` 常量是 3 个设备：`Earring`, `Ring`, `Watch`。
-2. 默认 `RAW_ROOT` 来自 `config.HEURISTIC_HF_SUBMISSION_ROOT / "raw_data"`。如果本地没有 `Multisite-PPG/raw_data`，需要显式传入 `--raw-root`。
+2. 默认 `RAW_ROOT` 来自 `src/prepare_windowed_dataset/config.py` 里的 `WINDOW_INPUT_ROOT`。如果本地没有 `Multisite-PPG/raw_data`，需要显式传入 `--raw-root`。
 3. 脚本有断点续跑逻辑：如果 `{dataset_name}_{pid}.npz` 已存在，会跳过该参与者。
 4. 如果修改了脚本逻辑但想重新生成某个参与者，需要先删除对应参与者的 `.npz` 和 summary，或输出到新的 dataset name。
 5. 数据集不保存 PPG-derived 标签。baseline/model 应自行从 `ppg_resampled` 计算 PPG peak、IBI、PRV/HRV、SQI 等。
@@ -341,6 +341,5 @@ stride 60 数据集在 Hugging Face 上保留，本地副本之前已删除以�
 - Pandas
 - NeuroKit2
 - 项目内部模块：
-  - `config`
-  - `algorithms.hrv`
-  - `io_utils.normalize_participant_id`
+  - `prepare_windowed_dataset.config`
+  - `heuristic_baselines.algorithms.hrv`

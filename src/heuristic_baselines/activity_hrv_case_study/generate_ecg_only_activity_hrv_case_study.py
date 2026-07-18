@@ -21,16 +21,21 @@ import pandas as pd
 # 让脚本可以复用 heuristic_baselines 目录和当前目录中的辅助模块。
 THIS_DIR = Path(__file__).resolve().parent
 HEURISTIC_DIR = THIS_DIR.parent
+SRC_DIR = HEURISTIC_DIR.parent
 sys.path.insert(0, str(HEURISTIC_DIR))
 sys.path.insert(0, str(THIS_DIR))
+sys.path.insert(0, str(SRC_DIR))
 
 # 复用共同窗口脚本里的 activity 解析/报告工具，以及数据集生成脚本里的 ECG label 逻辑。
 import generate_activity_hrv_case_study as activity_case
-import generate_rawaligned_4device_dataset as rawaligned
+from prepare_windowed_dataset import config as window_config
+from prepare_windowed_dataset import generate_rawaligned_4device_dataset as rawaligned
 
 
-# 默认从临时 raw 下载目录读取 Polar ECG，从本目录写出 case-study 结果。
-DEFAULT_RAW_ROOT = Path("/private/tmp/hrv_raw_gap_diagnosis/raw_data")
+# 默认优先读取项目配置里的 Multisite-PPG/raw_data；如果本机还没有正式 raw 目录，
+# 则兼容之前诊断任务下载到 /private/tmp 的 raw 数据。
+LEGACY_TMP_RAW_ROOT = Path("/private/tmp/hrv_raw_gap_diagnosis/raw_data")
+DEFAULT_RAW_ROOT = window_config.WINDOW_INPUT_ROOT if window_config.WINDOW_INPUT_ROOT.exists() else LEGACY_TMP_RAW_ROOT
 DEFAULT_LOG_DIR = THIS_DIR / "source_logs" / "raw_data"
 DEFAULT_OUTPUT_DIR = THIS_DIR
 

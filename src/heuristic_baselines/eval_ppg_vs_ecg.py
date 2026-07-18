@@ -40,7 +40,7 @@ RR_GRID_FS = 1000.0
 RMSSD_MAX_ECG_MS = 300.0
 # Bootstrap resamples for 95% CI on MAE and r.
 N_BOOTSTRAP = 1000
-# Motion segment size (seconds) for activity stratification, matching full_step_matrix_v2.
+# 活动分层使用的运动片段长度，沿用旧消融实验中的 10 秒设置。
 MOTION_SEG_SEC = 10
 
 

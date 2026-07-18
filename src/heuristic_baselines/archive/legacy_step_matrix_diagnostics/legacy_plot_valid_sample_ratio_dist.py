@@ -1,7 +1,8 @@
 """
-Plot the distribution of ppg_valid_sample_ratio from the rawaligned dataset,
-broken down by device and overall, to help decide if the 0.50 threshold is
-appropriate.
+历史探索脚本：绘制旧版 rawaligned 数据集的 ppg_valid_sample_ratio 分布。
+
+本脚本已归档，不属于正式 v1-primary unified heuristic baseline 主流程。
+默认路径和设备命名来自旧版 4-device 数据集，只用于历史诊断。
 """
 from __future__ import annotations
 
@@ -13,25 +14,27 @@ import numpy as np
 
 DEVICES = ("apple_watch", "garmin", "polar", "samsung")
 CHANNELS = ("ppg_green", "ppg_ir")
+ARCHIVE_ROOT = Path(__file__).resolve().parent
+HEURISTIC_ROOT = ARCHIVE_ROOT.parents[1]
 
 def main() -> None:
     data_dir = Path(
         sys.argv[1]
         if len(sys.argv) > 1
-        else "outputs/synced_4device_rawaligned_strict_reference"
+        else str(HEURISTIC_ROOT / "outputs" / "synced_4device_rawaligned_strict_reference")
     )
     npz_files = sorted(data_dir.glob("*.npz"))
     if not npz_files:
-        print(f"No .npz files found in {data_dir}")
+        print(f"没有在 {data_dir} 找到 .npz 文件")
         return
 
-    # Collect ratios: overall and per-device
-    all_ratios = []                                # flat across everything
+    # 收集总体和逐设备的有效样本比例。
+    all_ratios = []                                # 展平所有设备与通道
     per_device: dict[str, list[np.ndarray]] = {d: [] for d in DEVICES}
 
     for f in npz_files:
         with np.load(f, allow_pickle=True) as z:
-            r = z["ppg_valid_sample_ratio"]        # shape (N, 4, 2)
+            r = z["ppg_valid_sample_ratio"]        # 形状：(N, 4, 2)
             all_ratios.append(r.ravel())
             for di, dev in enumerate(DEVICES):
                 per_device[dev].append(r[:, di, :].ravel())
@@ -40,7 +43,7 @@ def main() -> None:
     for dev in DEVICES:
         per_device[dev] = np.concatenate(per_device[dev])
 
-    # ---------- Figure 1: overall histogram ----------
+    # ---------- 图 1：总体直方图 ----------
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
     ax = axes[0]
@@ -51,7 +54,7 @@ def main() -> None:
     ax.set_title("Overall Distribution")
     ax.legend()
 
-    # Annotate stats
+    # 标注统计量。
     below = (all_ratios < 0.50).sum()
     total = all_ratios.size
     txt = (
@@ -64,7 +67,7 @@ def main() -> None:
     ax.text(0.03, 0.95, txt, transform=ax.transAxes, va="top", fontsize=9,
             bbox=dict(boxstyle="round", fc="wheat", alpha=0.5))
 
-    # ---------- Figure 2: per-device CDF ----------
+    # ---------- 图 2：逐设备 CDF ----------
     ax = axes[1]
     thresholds_to_mark = [0.50, 0.70, 0.85, 0.95]
     for dev in DEVICES:
@@ -86,8 +89,8 @@ def main() -> None:
     print(f"[SAVED] {out_path}")
     plt.close()
 
-    # ---------- Print summary table ----------
-    print("\n--- Per-device summary ---")
+    # ---------- 打印汇总表 ----------
+    print("\n--- 逐设备汇总 ---")
     print(f"{'device':<15} {'N':>6} {'median':>8} {'P5':>8} {'P25':>8} {'<0.50':>8} {'<0.70':>8} {'<0.85':>8} {'<0.95':>8}")
     for dev in DEVICES:
         v = per_device[dev]

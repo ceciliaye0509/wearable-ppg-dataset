@@ -77,7 +77,7 @@ Use **Download Dataset** above.
 
 #### 1.2 Edit `config.py`
 
-Set these fields in `wearable-ppg-dataset/src/heuristic_baselines/config.py`:
+Set these fields in `src/heuristic_baselines/config.py`:
 
 - **`HEURISTIC_DATA_SOURCE`**: **`"sample"`** (default) for the sample windowed data, or **`"full"`** for the full **`ppg_windowed_data`** tree.
 - **`HEURISTIC_PIPELINE_PARTICIPANTS`**: which participants to run (default `["P7", "P8"]`).
@@ -212,7 +212,7 @@ Put **`wearable-ppg-dataset`** (the repo from GitHub) and **`Multisite-PPG`** (t
 
 #### 3.3 Edit `config.py`
 
-Set these fields in `wearable-ppg-dataset/src/prepare_windowed_dataset/config.py`:
+Set these fields in `src/prepare_windowed_dataset/config.py`:
 
 - **`WINDOW_DATA_SOURCE`**: **`"sample"`** (default) uses `sample_data/raw_data`; **`"full"`** uses `raw_data`.
 - **`PIPELINE_PARTICIPANTS`**: participants to run (default `["P7", "P8"]`).
@@ -237,6 +237,5 @@ python run_pipeline.py
 **Code:** Released under [GNU General Public License v3.0](./LICENSE) (GPL-3.0). Portions are derived from [WildPPG](https://github.com/eth-siplab/WildPPG), also licensed under GPL-3.0.
 
 **Dataset:** Released under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
-
 
 

@@ -21,10 +21,9 @@ self_supervised/
 └── run_selfsupervised_all.py # Batch runner across methods & positions
 ```
 
-> **Shared dependencies** (in `src/`):
-> - `models/backbones.py` — CNN-LSTM backbone
-> - `data_preprocess/data_preprocess_dataset.py` — single-device data loader
-> - `data_prep.py` — dataset dispatcher
+> **Shared dependencies** (in `src/model_baselines/`):
+> - `../models/backbones.py` — CNN-LSTM backbone
+> - `../data_preprocess/data_prep.py` — dataset dispatcher and single-device data loading
 
 ---
 
@@ -69,7 +68,7 @@ Contrastive learning with InfoNCE loss over augmented PPG window pairs.
 
 ## Running the Experiments
 
-Run from `src/self_supervised/` with `PYTHONPATH=..`.
+Run from `src/model_baselines/self_supervised/` with `PYTHONPATH=..`.
 
 **BYOL:**
 ```bash

@@ -1,7 +1,7 @@
 # ===========================================================================
 # ★ 模块说明（重点）
 # ===========================================================================
-# 本脚本用于生成「基于原始时间线对齐」的四设备 PPG 数据集，以 ECG R-peak 为标签。
+# 本脚本用于生成「基于原始时间线对齐」的三设备 PPG 数据集，以 ECG R-peak 为标签。
 # 与早期基于 5 分钟窗口的 v2 生成器不同，本版本的核心流程为：
 #   1. 从原始 PPG/ECG 时间序列出发；
 #   2. 在共享的绝对时间网格上切分窗口；
@@ -13,14 +13,14 @@
 # 派生信息应在 baseline 代码中按算法版本重新计算。
 # ===========================================================================
 """
-Generate raw-timeline aligned 4-device PPG dataset with ECG R-peak labels.
+Generate raw-timeline aligned multi-device PPG dataset with ECG R-peak labels.
 
 This generator is separate from the earlier 5min_windowed-based v2 generator.
 It follows the updated dataset definition:
 
   - start from raw PPG/ECG timelines;
   - cut windows on one shared absolute-time grid;
-  - resample all four PPG devices and both channels to a common target_fs Hz grid;
+  - resample selected PPG devices and both channels to a common target_fs Hz grid;
   - include windows using only PPG sample coverage and ECG label QC;
   - store per-device window-level accelerometer mean magnitude for motion-aware models;
   - use ECG R-peak location arrays as the primary label.
@@ -32,7 +32,7 @@ computed by baseline/evaluation code.
 Run with the project venv so SciPy and NeuroKit2 are available, e.g.
 
     /Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python \
-      src/heuristic_baselines/generate_rawaligned_4device_dataset.py \
+      src/prepare_windowed_dataset/generate_rawaligned_4device_dataset.py \
       --dataset-name synced_4device_rawaligned_strict_reference \
       --stride-sec 300
 """
@@ -52,15 +52,16 @@ import pandas as pd
 
 # ---------------------------------------------------------------------------
 # 项目内部模块导入
-# 将当前脚本所在目录加入 sys.path，以便直接 import 同级模块
+# 将 src 目录加入 sys.path。
+# 本生成器属于 prepare_windowed_dataset，但复用 heuristic_baselines 里的 HRV IBI 校正函数。
 # ---------------------------------------------------------------------------
 _PKG_ROOT = Path(__file__).resolve().parent
-if str(_PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PKG_ROOT))
+_SRC_ROOT = _PKG_ROOT.parent
+if str(_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SRC_ROOT))
 
-import config  # noqa: E402  # 项目级配置（路径、常量等）
-from algorithms import hrv  # noqa: E402  # HRV 相关算法（IBI 校正、RMSSD 等）
-from io_utils import normalize_participant_id  # noqa: E402  # 统一参与者 ID 格式
+from heuristic_baselines.algorithms import hrv  # noqa: E402  # HRV 相关算法（IBI 校正、RMSSD 等）
+from prepare_windowed_dataset import config  # noqa: E402  # 项目级配置（路径、常量等）
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -83,7 +84,8 @@ except ImportError as exc:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # 全局常量
 # ---------------------------------------------------------------------------
-RAW_ROOT = config.HEURISTIC_HF_SUBMISSION_ROOT / "raw_data"  # 原始数据根目录
+RAW_ROOT = config.WINDOW_INPUT_ROOT  # 原始数据根目录
+OUTPUT_ROOT = config.WINDOW_OUTPUT_ROOT  # 数据集输出根目录
 MAX_PEAKS_PER_WINDOW = 1200  # 每个窗口允许的最大 R-peak 数量（人类心率的生理极限大约 220-240 bpm（极端运动或病理性心动过速）240 bpm × 5 min = 1200 次心跳）
 
 
@@ -222,7 +224,7 @@ def _simple_ecg_qrs_sqi(
 # ---------------------------------------------------------------------------
 def _participant_ids(raw_root: Path, raw: str | None) -> list[str]:
     if raw:
-        return [normalize_participant_id(p) for p in raw.split(",") if p.strip()]
+        return [config.normalize_participant_id(p) for p in raw.split(",") if p.strip()]
     return sorted((p.name for p in raw_root.iterdir() if p.is_dir()), key=lambda x: int(x[1:]))
 
 
@@ -271,16 +273,6 @@ def _infer_fs_ms(t_ms: np.ndarray) -> float:
     if dt.size == 0:
         return float("nan")
     return float(1000.0 / np.median(dt))   # 中位间隔 -> 采样率
-
-
-# ---------------------------------------------------------------------------
-# 辅助函数：创建指定形状的空 object 数组
-# 每个元素初始化为空的 float32 数组，用于存储变长的波峰信息
-# ---------------------------------------------------------------------------
-def _empty_object_array(shape: tuple[int, ...]) -> np.ndarray:
-    arr = np.empty(shape, dtype=object)
-    arr.fill(np.array([], dtype=np.float32))
-    return arr
 
 
 def _object_array_cast(items: list[np.ndarray], dtype: np.dtype | type) -> np.ndarray:
@@ -423,8 +415,9 @@ def _ecg_label_for_window(
         diff = np.diff(corrected)
         rmssd = float(np.sqrt(np.mean(diff ** 2))) if diff.size else float("nan")  # 连续差值均方根
         sdnn = float(np.std(corrected, ddof=1)) if corrected.size > 1 else float("nan")  # NN 间期标准差
-        hr_bpm = float(60000.0 / np.nanmean(corrected)) if np.nanmean(corrected) > 0 else float("nan")  # 心率 BPM
-        rr_cv = float(np.nanstd(corrected) / np.nanmean(corrected)) if np.nanmean(corrected) > 0 else float("nan")  # 变异系数
+        mean_corrected = float(np.nanmean(corrected))
+        hr_bpm = float(60000.0 / mean_corrected) if mean_corrected > 0 else float("nan")  # 心率 BPM
+        rr_cv = float(np.nanstd(corrected) / mean_corrected) if mean_corrected > 0 else float("nan")  # 变异系数
     else:
         corrected = np.array([], dtype=np.float64)
         corr_ratio = float("nan")
@@ -452,6 +445,7 @@ def _ecg_label_for_window(
         valid_ratio >= min_ecg_valid_sample_ratio
         and valid_ibi_ratio >= min_valid_ibi_ratio
         and peak_count >= max(3, min_peak_count)
+        and peak_count <= MAX_PEAKS_PER_WINDOW
         and np.isfinite(rmssd)
         and (not np.isfinite(corr_ratio) or corr_ratio <= DEFAULT_MAX_IBI_CORRECTION_RATIO)
         and (not np.isfinite(hr_bpm) or (min_hr_bpm <= hr_bpm <= max_hr_bpm))
@@ -465,6 +459,8 @@ def _ecg_label_for_window(
         reasons.append("low_ecg_valid_ibi_ratio")       # 有效 IBI 比例过低
     if peak_count < max(3, min_peak_count):
         reasons.append("too_few_ecg_peaks")             # R-peak 数量不足
+    if peak_count > MAX_PEAKS_PER_WINDOW:
+        reasons.append("too_many_ecg_peaks")            # R-peak 数量超过生理上限
     if not np.isfinite(rmssd):
         reasons.append("invalid_ecg_hrv")               # HRV 指标无效
     if np.isfinite(corr_ratio) and corr_ratio > DEFAULT_MAX_IBI_CORRECTION_RATIO:
@@ -654,7 +650,7 @@ def generate_participant(
 ) -> Path | None:
     # --- 第 1 步：加载原始数据并计算基本参数 ---
     print(f"[{pid}] loading raw data")
-    ppg_raw = _load_ppg_raw(raw_root, pid, devices)    # 加载四设备 PPG
+    ppg_raw = _load_ppg_raw(raw_root, pid, devices)    # 加载选定设备 PPG
     ecg_raw = _load_ecg_raw(raw_root, pid)              # 加载 ECG
     target_len = int(round(window_sec * target_fs))     # 窗口在 target_fs 下的样本数
     sample_step_ms = 1000.0 / target_fs                 # 每个样本间隔（ms）
@@ -699,7 +695,6 @@ def generate_participant(
     boundary_keep = []           # 每个窗口是否通过边界对齐
     max_start_diff_ms = []       # 最大起始偏移
     max_end_diff_ms = []         # 最大结束偏移
-    ppg_sample_keep_pre = []     # PPG 采样初筛结果
     ecg_keep_pre = []            # ECG 质控初筛结果
     labels: list[dict[str, object]] = []  # ECG 标签字典列表
 
@@ -721,7 +716,6 @@ def generate_participant(
         max_end_diff_ms.append(float(np.nanmax(end_offsets)))
         if not boundary_ok:
             labels.append({})
-            ppg_sample_keep_pre.append(False)
             ecg_keep_pre.append(False)
             continue
         # 边界对齐通过后，执行 ECG 标签生成与质控
@@ -739,7 +733,6 @@ def generate_participant(
         )
         labels.append(label)
         ecg_keep_pre.append(bool(label["ecg_label_qc_pass"]))
-        ppg_sample_keep_pre.append(True)  # PPG 采样率的精确检查在重采样时进行
 
     # ★ 合并边界对齐 + ECG 质控结果，筛选出初步保留的窗口索引
     boundary_keep_arr = np.asarray(boundary_keep, dtype=bool)
@@ -938,13 +931,13 @@ def generate_participant(
 # ---------------------------------------------------------------------------
 def main() -> None:
     # --- 命令行参数定义 ---
-    ap = argparse.ArgumentParser(description="Generate raw-aligned 4-device ECG-label dataset.")
+    ap = argparse.ArgumentParser(description="Generate raw-aligned multi-device ECG-label dataset.")
     ap.add_argument("--participants", default=None)          # 指定参与者（逗号分隔）
     ap.add_argument("--exclude", default="P2,P14,P16,P17")   # 排除的参与者
     ap.add_argument(
         "--devices",
         default=",".join(DEVICES),
-        help="Comma-separated PPG devices to include. Default: all devices.",
+        help="Comma-separated PPG devices to include. Default: Earring,Ring,Watch.",
     )
     ap.add_argument("--raw-root", default=str(RAW_ROOT))                  # 原始数据根目录
     ap.add_argument("--dataset-name", required=True)                       # 数据集名称（必填）
@@ -965,9 +958,9 @@ def main() -> None:
 
     # --- 解析参数并准备输入 ---
     raw_root = Path(args.raw_root).resolve()
-    out_dir = Path(args.out_dir).resolve() if args.out_dir else (config.HEURISTIC_RESULT_ROOT / args.dataset_name).resolve()
+    out_dir = Path(args.out_dir).resolve() if args.out_dir else (OUTPUT_ROOT / args.dataset_name).resolve()
     participants = _participant_ids(raw_root, args.participants)
-    excluded = {normalize_participant_id(p) for p in args.exclude.split(",") if p.strip()}
+    excluded = {config.normalize_participant_id(p) for p in args.exclude.split(",") if p.strip()}
     participants = [p for p in participants if p not in excluded]  # 过滤排除的参与者
     # 设备名称校验
     device_lookup = {d.lower(): d for d in DEVICES}
