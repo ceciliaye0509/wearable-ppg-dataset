@@ -1,0 +1,148 @@
+[hrv_seg] 16 participants: ['P1', 'P10', 'P11', 'P12', 'P13', 'P15', 'P18', 'P19', 'P20', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9']
+
+============================================================
+Seed 1
+============================================================
+
+  Target participant: P1
+    Epoch   1/40  |  Train Loss: 0.9033  |  Val Loss: 1.2955 *
+    Epoch   2/40  |  Train Loss: 0.7952  |  Val Loss: 1.0112 *
+    Epoch   3/40  |  Train Loss: 0.7340  |  Val Loss: 0.9916 *
+    Epoch   4/40  |  Train Loss: 0.6945  |  Val Loss: 0.9906 *
+    Epoch   5/40  |  Train Loss: 0.6565  |  Val Loss: 0.8201 *
+    Epoch   6/40  |  Train Loss: 0.6239  |  Val Loss: 1.1309
+    Epoch   7/40  |  Train Loss: 0.6039  |  Val Loss: 0.8863
+    Epoch   8/40  |  Train Loss: 0.5921  |  Val Loss: 0.8711
+    Epoch   9/40  |  Train Loss: 0.5765  |  Val Loss: 0.9189
+    Epoch  10/40  |  Train Loss: 0.5527  |  Val Loss: 0.7165 *
+    Epoch  11/40  |  Train Loss: 0.5394  |  Val Loss: 0.7872
+    Epoch  12/40  |  Train Loss: 0.5174  |  Val Loss: 0.9546
+    Epoch  13/40  |  Train Loss: 0.5006  |  Val Loss: 0.9047
+    Epoch  14/40  |  Train Loss: 0.4920  |  Val Loss: 0.8467
+    Epoch  15/40  |  Train Loss: 0.4848  |  Val Loss: 0.7387
+    Early stopping at epoch 15 (no improvement for 5 epochs)
+    ecg_sdnn_ms  R2=-0.169  MAE= 10.73 ms
+    ecg_rmssd_ms R2=-0.416  MAE=  9.05 ms
+
+  Target participant: P10
+    Epoch   1/40  |  Train Loss: 0.9156  |  Val Loss: 1.1229 *
+    Epoch   2/40  |  Train Loss: 0.8097  |  Val Loss: 1.1006 *
+    Epoch   3/40  |  Train Loss: 0.7494  |  Val Loss: 1.0460 *
+    Epoch   4/40  |  Train Loss: 0.7062  |  Val Loss: 0.9857 *
+    Epoch   5/40  |  Train Loss: 0.6617  |  Val Loss: 1.0476
+    Epoch   6/40  |  Train Loss: 0.6316  |  Val Loss: 0.8536 *
+    Epoch   7/40  |  Train Loss: 0.6134  |  Val Loss: 1.0163
+    Epoch   8/40  |  Train Loss: 0.5853  |  Val Loss: 0.8181 *
+    Epoch   9/40  |  Train Loss: 0.5637  |  Val Loss: 0.8804
+    Epoch  10/40  |  Train Loss: 0.5463  |  Val Loss: 0.9893
+    Epoch  11/40  |  Train Loss: 0.5361  |  Val Loss: 0.8952
+    Epoch  12/40  |  Train Loss: 0.5180  |  Val Loss: 1.0713
+    Epoch  13/40  |  Train Loss: 0.5056  |  Val Loss: 0.7508 *
+    Epoch  14/40  |  Train Loss: 0.4919  |  Val Loss: 1.0773
+    Epoch  15/40  |  Train Loss: 0.4844  |  Val Loss: 1.0654
+    Epoch  16/40  |  Train Loss: 0.4760  |  Val Loss: 0.7877
+    Epoch  17/40  |  Train Loss: 0.4595  |  Val Loss: 0.8838
+    Epoch  18/40  |  Train Loss: 0.4443  |  Val Loss: 0.8761
+    Early stopping at epoch 18 (no improvement for 5 epochs)
+    ecg_sdnn_ms  R2=-0.490  MAE= 13.57 ms
+    ecg_rmssd_ms R2=-3.481  MAE=  7.36 ms
+
+  Target participant: P11
+    Epoch   1/40  |  Train Loss: 0.9247  |  Val Loss: 1.2446 *
+    Epoch   2/40  |  Train Loss: 0.8279  |  Val Loss: 1.1668 *
+    Epoch   3/40  |  Train Loss: 0.7786  |  Val Loss: 1.1666 *
+    Epoch   4/40  |  Train Loss: 0.7370  |  Val Loss: 1.0348 *
+    Epoch   5/40  |  Train Loss: 0.6998  |  Val Loss: 0.9484 *
+    Epoch   6/40  |  Train Loss: 0.6783  |  Val Loss: 0.9969
+    Epoch   7/40  |  Train Loss: 0.6625  |  Val Loss: 1.0138
+    Epoch   8/40  |  Train Loss: 0.6411  |  Val Loss: 0.9615
+    Epoch   9/40  |  Train Loss: 0.6172  |  Val Loss: 0.9952
+    Epoch  10/40  |  Train Loss: 0.5999  |  Val Loss: 0.9128 *
+    Epoch  11/40  |  Train Loss: 0.5886  |  Val Loss: 0.9011 *
+    Epoch  12/40  |  Train Loss: 0.5760  |  Val Loss: 0.9424
+    Epoch  13/40  |  Train Loss: 0.5675  |  Val Loss: 1.0306
+    Epoch  14/40  |  Train Loss: 0.5490  |  Val Loss: 0.8584 *
+    Epoch  15/40  |  Train Loss: 0.5400  |  Val Loss: 0.8171 *
+    Epoch  16/40  |  Train Loss: 0.5175  |  Val Loss: 0.8630
+    Epoch  17/40  |  Train Loss: 0.5156  |  Val Loss: 0.8451
+    Epoch  18/40  |  Train Loss: 0.5000  |  Val Loss: 0.7635 *
+    Epoch  19/40  |  Train Loss: 0.4911  |  Val Loss: 0.7655
+    Epoch  20/40  |  Train Loss: 0.4774  |  Val Loss: 0.7186 *
+    Epoch  21/40  |  Train Loss: 0.4746  |  Val Loss: 0.7969
+    Epoch  22/40  |  Train Loss: 0.4621  |  Val Loss: 0.6433 *
+    Epoch  23/40  |  Train Loss: 0.4549  |  Val Loss: 0.9962
+    Epoch  24/40  |  Train Loss: 0.4423  |  Val Loss: 0.8266
+    Epoch  25/40  |  Train Loss: 0.4335  |  Val Loss: 0.7956
+    Epoch  26/40  |  Train Loss: 0.4282  |  Val Loss: 0.7016
+    Epoch  27/40  |  Train Loss: 0.4172  |  Val Loss: 0.9109
+    Early stopping at epoch 27 (no improvement for 5 epochs)
+    ecg_sdnn_ms  R2=-1.015  MAE= 19.25 ms
+    ecg_rmssd_ms R2=-3.160  MAE= 19.17 ms
+
+  Target participant: P12
+    Epoch   1/40  |  Train Loss: 0.9004  |  Val Loss: 1.2582 *
+    Epoch   2/40  |  Train Loss: 0.8076  |  Val Loss: 1.0413 *
+    Epoch   3/40  |  Train Loss: 0.7588  |  Val Loss: 0.9933 *
+    Epoch   4/40  |  Train Loss: 0.7164  |  Val Loss: 1.1017
+    Epoch   5/40  |  Train Loss: 0.6808  |  Val Loss: 0.9284 *
+    Epoch   6/40  |  Train Loss: 0.6568  |  Val Loss: 0.8808 *
+    Epoch   7/40  |  Train Loss: 0.6288  |  Val Loss: 0.8139 *
+    Epoch   8/40  |  Train Loss: 0.6150  |  Val Loss: 0.7404 *
+    Epoch   9/40  |  Train Loss: 0.5959  |  Val Loss: 0.9099
+    Epoch  10/40  |  Train Loss: 0.5808  |  Val Loss: 1.0750
+    Epoch  11/40  |  Train Loss: 0.5680  |  Val Loss: 1.0327
+    Epoch  12/40  |  Train Loss: 0.5531  |  Val Loss: 0.7943
+    Epoch  13/40  |  Train Loss: 0.5312  |  Val Loss: 0.7778
+    Early stopping at epoch 13 (no improvement for 5 epochs)
+    ecg_sdnn_ms  R2= 0.118  MAE= 17.13 ms
+    ecg_rmssd_ms R2=-1.029  MAE=  9.00 ms
+
+  Target participant: P13
+    Epoch   1/40  |  Train Loss: 0.9281  |  Val Loss: 1.4194 *
+    Epoch   2/40  |  Train Loss: 0.8061  |  Val Loss: 1.0031 *
+    Epoch   3/40  |  Train Loss: 0.7420  |  Val Loss: 0.9483 *
+    Epoch   4/40  |  Train Loss: 0.6906  |  Val Loss: 1.0161
+    Epoch   5/40  |  Train Loss: 0.6624  |  Val Loss: 0.8478 *
+    Epoch   6/40  |  Train Loss: 0.6301  |  Val Loss: 0.7796 *
+    Epoch   7/40  |  Train Loss: 0.6108  |  Val Loss: 0.9430
+    Epoch   8/40  |  Train Loss: 0.5824  |  Val Loss: 0.8897
+    Epoch   9/40  |  Train Loss: 0.5682  |  Val Loss: 0.9383
+    Epoch  10/40  |  Train Loss: 0.5426  |  Val Loss: 0.9171
+    Epoch  11/40  |  Train Loss: 0.5330  |  Val Loss: 0.8554
+    Early stopping at epoch 11 (no improvement for 5 epochs)
+    ecg_sdnn_ms  R2=-0.366  MAE= 11.60 ms
+    ecg_rmssd_ms R2=-2.225  MAE= 13.93 ms
+
+  Target participant: P15
+    Epoch   1/40  |  Train Loss: 0.8929  |  Val Loss: 1.1783 *
+    Epoch   2/40  |  Train Loss: 0.7775  |  Val Loss: 1.0075 *
+    Epoch   3/40  |  Train Loss: 0.7239  |  Val Loss: 1.2033
+    Epoch   4/40  |  Train Loss: 0.6889  |  Val Loss: 1.0870
+    Epoch   5/40  |  Train Loss: 0.6550  |  Val Loss: 1.0431
+    Epoch   6/40  |  Train Loss: 0.6291  |  Val Loss: 0.8093 *
+    Epoch   7/40  |  Train Loss: 0.6102  |  Val Loss: 0.9037
+    Epoch   8/40  |  Train Loss: 0.5932  |  Val Loss: 0.8934
+    Epoch   9/40  |  Train Loss: 0.5724  |  Val Loss: 0.9133
+    Epoch  10/40  |  Train Loss: 0.5583  |  Val Loss: 0.7922 *
+    Epoch  11/40  |  Train Loss: 0.5435  |  Val Loss: 0.9631
+    Epoch  12/40  |  Train Loss: 0.5294  |  Val Loss: 0.8615
+    Epoch  13/40  |  Train Loss: 0.5224  |  Val Loss: 1.1522
+    Epoch  14/40  |  Train Loss: 0.5083  |  Val Loss: 1.0673
+    Epoch  15/40  |  Train Loss: 0.5000  |  Val Loss: 0.9791
+    Early stopping at epoch 15 (no improvement for 5 epochs)
+    ecg_sdnn_ms  R2=-0.616  MAE= 12.87 ms
+    ecg_rmssd_ms R2=-2.493  MAE= 12.04 ms
+
+  Target participant: P18
+    Epoch   1/40  |  Train Loss: 0.9577  |  Val Loss: 1.4262 *
+    Epoch   2/40  |  Train Loss: 0.8907  |  Val Loss: 1.4987
+    Epoch   3/40  |  Train Loss: 0.8394  |  Val Loss: 1.5032
+    Epoch   4/40  |  Train Loss: 0.7867  |  Val Loss: 1.3394 *
+    Epoch   5/40  |  Train Loss: 0.7462  |  Val Loss: 1.1393 *
+    Epoch   6/40  |  Train Loss: 0.7163  |  Val Loss: 1.3028
+    Epoch   7/40  |  Train Loss: 0.6956  |  Val Loss: 1.2397
+    Epoch   8/40  |  Train Loss: 0.6747  |  Val Loss: 1.1012 *
+    Epoch   9/40  |  Train Loss: 0.6567  |  Val Loss: 1.2551
+    Epoch  10/40  |  Train Loss: 0.6346  |  Val Loss: 1.0071 *
+    Epoch  11/40  |  Train Loss: 0.6146  |  Val Loss: 1.0803
+    Epoch  12/40  |  Train Loss: 0.6014  |  Val Loss: 1.2812

@@ -81,7 +81,7 @@ parser.add_argument('--logdir', default='log/', type=str,
                     help='Directory for per-run log files.')
 parser.add_argument('--use_preprocess', action='store_true')
 
-parser.add_argument('--task', default='hr', choices=['hr', 'hrv', 'peak', 'hrv_seg'])
+parser.add_argument('--task', default='hr', choices=['hr', 'hrv', 'peak'])
 parser.add_argument('--device_name', default='watch', choices=['earring','ring','watch'])
 parser.add_argument('--use_deriv', type=int, default=1)
 parser.add_argument('--resample_hz', type=float, default=0)   # 0 = keep 100Hz; 50 recommended first
@@ -285,7 +285,7 @@ def train_sup(args, seed_idx: int):
 
     device = torch.device(f'cuda:{args.cuda}' if torch.cuda.is_available() else 'cpu')
 
-    if args.task in ('hrv', 'peak', 'hrv_seg'):
+    if args.task in ('hrv', 'peak'):
         train_loaders, val_loader, test_loader = H.setup_dataloaders_hrv(args)
     else:
         train_loaders, val_loader, test_loader = setup_dataloaders(args)
@@ -305,7 +305,7 @@ def train_sup(args, seed_idx: int):
     logging.basicConfig(filename=log_path, level=logging.INFO,
                         format='%(asctime)s %(message)s')
 
-    criterion = H.make_criterion(args) if args.task in ('hrv','peak','hrv_seg') else nn.L1Loss()
+    criterion = H.make_criterion(args) if args.task in ('hrv','peak') else nn.L1Loss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     best_state = train(args, train_loaders, val_loader, model, device, optimizer, criterion)
@@ -330,7 +330,7 @@ def train_sup(args, seed_idx: int):
 # ── Dataset config ────────────────────────────────────────────────────────────
 
 def configure_dataset(args):
-    if args.task in ('hrv', 'peak', 'hrv_seg'):
+    if args.task in ('hrv', 'peak'):
         step = int(round(args.src_hz / args.resample_hz)) if args.resample_hz else 1
         args.len_sw    = (30000 + step - 1) // step      # length after downsampling
         args.out_dim   = args.len_sw
@@ -404,23 +404,21 @@ if __name__ == '__main__':
                 _, res, bres = out
                 fold_results.append(res)
                 for k, v in res.items():
-                    print(f"    {k:12s} R2={v['r2']:6.3f}  r={v['r']:6.3f}  MAE={v['mae']:6.2f} ms")
+                    print(f"    {k:12s} R2={v['r2']:6.3f}  MAE={v['mae']:6.2f} ms")
                 if bres:
                     for k, v in bres.items():
-                        print(f"    (PRV) {k:12s} R2={v['r2']:6.3f}  r={v['r']:6.3f}  MAE={v['mae']:6.2f} ms")
+                        print(f"    (PRV) {k:12s} R2={v['r2']:6.3f}  MAE={v['mae']:6.2f} ms")
         all_seed_results.append(fold_results)
 
 
     # ── Final summary across all participants
-    if args.task in ('hrv', 'peak', 'hrv_seg'):
+    if args.task in ('hrv', 'peak'):
         flat = [r for seed in all_seed_results for r in seed]   # list of dict
         print(f"\n{'='*60}\nFinal ({len(flat)} folds, mean +/- std):")
         for k in H.LABEL_KEYS:
             r2  = np.array([f[k]['r2']  for f in flat])
-            rr  = np.array([f[k]['r']   for f in flat])
             mae = np.array([f[k]['mae'] for f in flat])
             print(f"  {k:12s} R2 {np.nanmean(r2):.3f}+/-{np.nanstd(r2):.3f}  "
-                  f"r {np.nanmean(rr):.3f}+/-{np.nanstd(rr):.3f}  "
                   f"MAE {np.nanmean(mae):.2f}+/-{np.nanstd(mae):.2f} ms")
     else:
         flat = np.array(all_seed_results).reshape(-1, 3)   # ← (n_seeds * n_participants, 3)

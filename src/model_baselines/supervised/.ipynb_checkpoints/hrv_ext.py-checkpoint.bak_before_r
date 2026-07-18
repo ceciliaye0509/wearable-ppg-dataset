@@ -343,17 +343,13 @@ def _regress_metrics(yt, yp):
     out = {}
     for j, n in enumerate(LABEL_KEYS):
         t, p = yt[:, j], yp[:, j]
-        if t.size < 2:
-            out[n] = dict(r2=float("nan"), r=float("nan"), me=float("nan"),
+        if t.size < 2:                       # too few samples (e.g. untrained degenerate)
+            out[n] = dict(r2=float("nan"), me=float("nan"),
                           sde=float("nan"), mae=float("nan"), n=int(t.size))
             continue
         ss = np.sum((t - p) ** 2)
         r2 = 1 - ss / (np.sum((t - t.mean()) ** 2) + 1e-12)
-        if p.std() < 1e-8 or t.std() < 1e-8:
-            r = float("nan")
-        else:
-            r = float(np.corrcoef(t, p)[0, 1])
-        out[n] = dict(r2=r2, r=r, me=float(np.mean(p - t)),
+        out[n] = dict(r2=r2, me=float(np.mean(p - t)),
                       sde=float(np.std(p - t)), mae=float(np.mean(np.abs(p - t))),
                       n=int(t.size))
     return out

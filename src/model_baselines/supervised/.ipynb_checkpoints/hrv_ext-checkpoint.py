@@ -161,10 +161,7 @@ def setup_dataloaders_hrv(args):
         Xva = np.transpose(Xva, (0, 2, 1))
         Xte = np.transpose(Xte, (0, 2, 1))
 
-    if args.task == "hrv_seg":                     # C: cut each 5-min into 30 x 10s
-        Xtr = _segment(Xtr); Xva = _segment(Xva); Xte = _segment(Xte)  # (N, S, C, L)
-
-    if args.task in ("hrv", "hrv_seg"):
+    if args.task == "hrv":
         Ytr_ms = np.concatenate([d["y_ms"] for d in tr])
         mu, sd, logm = _fit_scaler(Ytr_ms)
         args._mu, args._sd, args._logmask = mu, sd, logm
@@ -234,40 +231,6 @@ class _Dec(nn.Module):
             x = nn.functional.pad(x, (0, skip.shape[-1] - x.shape[-1]))
         return s.net(torch.cat([x, skip], 1))
 
-def _segment(X, n_seg=30):
-    # (N, C, T) -> (N, n_seg, C, L)  ; L = T // n_seg  (10s each for a 5-min window)
-    N, C, T = X.shape
-    L = T // n_seg
-    X = X[:, :, :L * n_seg]
-    return X.reshape(N, C, n_seg, L).transpose(0, 2, 1, 3).copy()
-
-
-class SegNet(nn.Module):
-    """Path C: a shared small CNN encodes each 10s segment, then aggregates across
-    the 30 segments (mean or LSTM) -> [SDNN, RMSSD]. Input (B, S, C, L).
-    Returns (out, None) to match your train()'s `out, _ = model(...)`."""
-    def __init__(self, cin, agg="mean", feat=64, k_out=2):
-        super().__init__()
-        self.enc = nn.Sequential(
-            nn.Conv1d(cin, 32, 7, 2, 3), nn.BatchNorm1d(32), nn.ReLU(True),
-            nn.Conv1d(32, 64, 7, 2, 3),  nn.BatchNorm1d(64), nn.ReLU(True),
-            nn.Conv1d(64, feat, 7, 2, 3), nn.BatchNorm1d(feat), nn.ReLU(True),
-            nn.AdaptiveAvgPool1d(1))
-        self.agg = agg
-        if agg == "lstm":
-            self.rnn = nn.LSTM(feat, feat, batch_first=True)
-        self.head = nn.Linear(feat, k_out)
-    def forward(self, x):
-        B, S, C, L = x.shape
-        f = self.enc(x.reshape(B * S, C, L)).squeeze(-1)   # (B*S, feat)
-        f = f.reshape(B, S, -1)                            # (B, S, feat)
-        if self.agg == "lstm":
-            _, (h, _) = self.rnn(f); g = h[-1]             # (B, feat)
-        else:
-            g = f.mean(1)                                  # (B, feat)
-        return self.head(g), None
-
-
 class PeakNet(nn.Module):
     """(B,C,T) -> (B,1,T) per-sample logit. Returns (logit, None) to match
     your train()'s `out, _ = model(...)` unpacking."""
@@ -286,7 +249,7 @@ class PeakNet(nn.Module):
 
 
 def make_criterion(args):
-    return nn.BCEWithLogitsLoss() if args.task == "peak" else nn.MSELoss()
+    return nn.MSELoss() if args.task == "hrv" else nn.BCEWithLogitsLoss()
 
 
 # -- task-specific test (use instead of your test()) --------------------------
@@ -343,17 +306,13 @@ def _regress_metrics(yt, yp):
     out = {}
     for j, n in enumerate(LABEL_KEYS):
         t, p = yt[:, j], yp[:, j]
-        if t.size < 2:
-            out[n] = dict(r2=float("nan"), r=float("nan"), me=float("nan"),
+        if t.size < 2:                       # too few samples (e.g. untrained degenerate)
+            out[n] = dict(r2=float("nan"), me=float("nan"),
                           sde=float("nan"), mae=float("nan"), n=int(t.size))
             continue
         ss = np.sum((t - p) ** 2)
         r2 = 1 - ss / (np.sum((t - t.mean()) ** 2) + 1e-12)
-        if p.std() < 1e-8 or t.std() < 1e-8:
-            r = float("nan")
-        else:
-            r = float(np.corrcoef(t, p)[0, 1])
-        out[n] = dict(r2=r2, r=r, me=float(np.mean(p - t)),
+        out[n] = dict(r2=r2, me=float(np.mean(p - t)),
                       sde=float(np.std(p - t)), mae=float(np.mean(np.abs(p - t))),
                       n=int(t.size))
     return out
