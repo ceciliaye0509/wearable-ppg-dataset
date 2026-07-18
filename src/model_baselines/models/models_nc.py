@@ -468,7 +468,7 @@ class ResNet1D(nn.Module):
         # self.softmax = nn.Softmax(dim=1)
         self.reg = regress
         if regress:
-            self.regressor = nn.Linear(out_channels, 1)
+            self.regressor = nn.Linear(out_channels, n_classes)
         
     def forward(self, x):
         x = x.transpose(-1,-2) # RESNET 1D takes channels first
