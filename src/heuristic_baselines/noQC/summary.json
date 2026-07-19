@@ -1,0 +1,10 @@
+{
+  "policy": "v1_2_frozen_peak_methods_no_qc_training_stride30",
+  "role": "training_stride30",
+  "channel_metrics_csv": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/outputs/all_participants_devicewise_baseline_v1_1_plus_neurokit/v1_1_plus_neurokit_channel_metrics.csv",
+  "frozen_choices_csv": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/outputs/formal_v1_2_report_both_channels/v1_2_both_channels_frozen_choices.csv",
+  "qc_eval_csv": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/outputs/formal_v1_2_report_both_channels/v1_2_both_channels_frozen_eval.csv",
+  "quality_checks_applied": false,
+  "reports_green_and_ir": true,
+  "validity_requirement": "finite PPG and ECG HRV metric values"
+}

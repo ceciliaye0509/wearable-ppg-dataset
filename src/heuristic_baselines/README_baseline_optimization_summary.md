@@ -4,10 +4,10 @@
 
 ## 当前结论
 
-- 当前 primary comparison 仍建议使用 `formal_v1_unified_baseline`。
+- 当前更强的 heuristic comparison 建议新增报告 `formal_v1_2_report_both_channels`；如果需要与早期严格统一规则比较，保留 `formal_v1_unified_baseline` 作为 conservative reference。
 - v1.1 扩展候选后没有在 primary unified 边界内超过 v1；它保留为一次候选扩展记录。
 - full-cohort NeuroKit Elgendi candidates 已经补算并放入同一个 formal unified freeze 框架比较；结果仍然没有替代当前 SciPy primary baseline。
-- v1.1 的 device-wise analysis 显示：如果允许每个设备使用不同处理参数，Earring 和 Ring 可以更好；但这不满足“所有设备同一套处理办法，只允许设备内固定通道不同”的公平对比边界。
+- v1.2 按新的边界允许每个 `device x channel` 使用不同 peak/bandpass/gate 参数，但 green 和 IR 都必须汇报，不再在通道间只选一个最佳。
 - Watch 的 RMSSD 覆盖率仍然偏低；full-cohort NeuroKit 没有解决这个问题，下一步更应该看 gate / IBI 质量门控。
 
 ## 实验边界
@@ -25,6 +25,34 @@
 - 明确正式脚本只应把 `strict_reference` 用在冻结后的评估上。
 
 这部分来自你发送的实验边界要求，并且现在已经保留为项目内 README。
+
+## Coverage 是怎么算的
+
+本文里的 coverage / 覆盖率不是原始 PPG 信号存在率，也不是 peak detector 的召回率，而是某个 baseline 在指定窗口集合里最终能给出有效 HRV prediction 的比例。
+
+普通 QC baseline 的口径：
+
+```text
+coverage = n_valid / n_total
+
+n_total = 当前 dataset role 下该 device 或 device x channel 的窗口数
+n_valid = PPG HRV 和 ECG HRV 都是有限值，且该窗口通过 frozen QC gate 的窗口数
+```
+
+因此当前 v1/v1.1/v1.2 表里的 training 覆盖率由两步共同决定：
+
+1. detector / bandpass / peak method 是否能从 `ppg_resampled` 产生足够 peaks，并计算出有限的 PPG RMSSD/SDNN。
+2. 该窗口是否通过已冻结的 quality gate，例如 `ppg_valid_sample_ratio`、SQI、valid IBI ratio、IBI correction ratio、IBI CV、RMSSD 上限等。
+
+motion threshold sensitivity 的口径略有不同：分母不是完整 `training_stride30`，而是先筛选 `accel_motion_mean_mag < threshold` 后的 motion 子集。
+
+```text
+coverage_within_motion = n_valid_after_QC_inside_motion_subset / n_windows_inside_motion_subset
+```
+
+所以 motion 表中的 coverage 只能解释“在该 motion 子集内部，baseline 能保留多少窗口”，不能直接和完整 training_stride30 coverage 混为一谈。
+
+noQC ablation 的详细 coverage 口径和结果移到 `noQC/README.md`。简短地说，noQC coverage 衡量 frozen detector/bandpass 能产出有限 HRV 的上限；coverage 上升不一定代表 HRV agreement 变好，仍必须和 MAE、R、bias 一起解释。
 
 ## v1：重新计算 PPG-derived baseline 指标
 
@@ -57,13 +85,13 @@
 - 不允许 Earring、Ring、Watch 各自使用不同 bandpass 或不同 QC gate 作为 primary baseline。
 - `formal_freeze_v1_unified_baseline.py` 只用 `training_stride30` 产生候选总结和冻结规则，再把冻结规则应用到 `strict_reference`；它不会输出 strict 上的候选扫描，避免继续用 strict 调参。
 
-v1 formal 结果：
+v1 formal 的 training_stride30 结果，按 RMSSD MAE 从好到差排序：
 
-| 设备 | strict RMSSD MAE | strict RMSSD R | strict 覆盖率 | strict SDNN R |
+| 设备 | training RMSSD MAE | training RMSSD R | training 覆盖率 | training SDNN R |
 |---|---:|---:|---:|---:|
-| Earring | 16.66 ms | 0.310 | 77.32% | 0.774 |
-| Ring | 12.52 ms | 0.448 | 57.74% | 0.716 |
-| Watch | 14.07 ms | 0.347 | 22.57% | 0.589 |
+| Ring | 12.53 ms | 0.446 | 57.93% | 0.712 |
+| Watch | 14.18 ms | 0.364 | 22.83% | 0.580 |
+| Earring | 16.57 ms | 0.323 | 77.26% | 0.758 |
 
 对应输出：
 
@@ -82,13 +110,13 @@ v1 formal 结果：
 - 增加 `--base-channel-metrics-csv`，可以复用 v1 已经算好的基础候选，避免重复计算。
 - 增加 `--workers`，使用线程并行处理参与者。
 
-v1.1 device-wise analysis 结果：
+v1.1 device-wise analysis 的 training_stride30 结果，按 RMSSD MAE 从好到差排序：
 
-| 设备 | strict RMSSD MAE | strict RMSSD R | strict 覆盖率 | 解释 |
+| 设备 | training RMSSD MAE | training RMSSD R | training 覆盖率 | 解释 |
 |---|---:|---:|---:|---|
-| Earring | 15.51 ms | 0.413 | 67.23% | 比 unified v1 的 MAE/R 更好，但覆盖率下降 |
-| Ring | 11.66 ms | 0.490 | 38.16% | 比 unified v1 的 MAE/R 更好，但覆盖率下降 |
-| Watch | 14.07 ms | 0.347 | 22.57% | 基本沿用 v1 结果 |
+| Ring | 11.54 ms | 0.495 | 38.57% | 比 unified v1 的 MAE/R 更好，但覆盖率下降 |
+| Watch | 14.18 ms | 0.364 | 22.83% | 基本沿用 v1 结果 |
+| Earring | 15.40 ms | 0.419 | 66.98% | 比 unified v1 的 MAE/R 更好，但覆盖率下降 |
 
 注意：这张表允许不同设备使用不同处理参数，因此只作为 stronger reference / analysis，不作为 primary comparison。
 
@@ -110,13 +138,13 @@ v1.1 device-wise analysis 结果：
   `scipy_bp07_35_prom025_corr02__fixed_best_channel_per_device__gate_sqi04_ibi08_corr03_cv30_rmssd200`
 - 因此 v1.1 formal 不替代 v1，而是记录“扩展候选后没有改变 primary unified 规则”。
 
-v1.1 formal 结果与 v1 formal 相同：
+v1.1 formal 的 training_stride30 结果与 v1 formal 相同，按 RMSSD MAE 从好到差排序：
 
-| 设备 | strict RMSSD MAE | strict RMSSD R | strict 覆盖率 |
+| 设备 | training RMSSD MAE | training RMSSD R | training 覆盖率 |
 |---|---:|---:|---:|
-| Earring | 16.66 ms | 0.310 | 77.32% |
-| Ring | 12.52 ms | 0.448 | 57.74% |
-| Watch | 14.07 ms | 0.347 | 22.57% |
+| Ring | 12.53 ms | 0.446 | 57.93% |
+| Watch | 14.18 ms | 0.364 | 22.83% |
+| Earring | 16.57 ms | 0.323 | 77.26% |
 
 对应输出：
 
@@ -168,16 +196,10 @@ Training 上 Top unified candidates：
 - NeuroKit mean coverage 也更低：`48.13%` vs `52.67%`。
 - NeuroKit mean R 接近 SciPy，但没有超过 SciPy。
 
-per-participant diagnosis 的 strict_reference 结果：
+per-participant diagnosis 说明：
 
-| 设备 | 方法 | mean MAE | median MAE | mean R | mean coverage |
-|---|---|---:|---:|---:|---:|
-| Earring | primary SciPy | 17.76 ms | 16.44 ms | 0.262 | 78.38% |
-| Earring | best NeuroKit | 18.18 ms | 16.52 ms | 0.363 | 75.11% |
-| Ring | primary SciPy | 11.99 ms | 11.66 ms | 0.386 | 56.88% |
-| Ring | best NeuroKit | 12.10 ms | 12.07 ms | 0.369 | 48.15% |
-| Watch | primary SciPy | 12.74 ms | 10.67 ms | 0.297 | 23.32% |
-| Watch | best NeuroKit | 21.33 ms | 12.81 ms | 0.222 | 21.70% |
+- 现有 `diagnosis_scipy_vs_neurokit_participants` artifact 只保存了 `strict_reference` 诊断表，没有对应的 `training_stride30` participant-level diagnosis。
+- 为保持本 summary 的结果口径一致，这里不再列出该 strict 表；如需继续比较 SciPy vs NeuroKit 的 participant-level 波动，应补生成 training_stride30 版本后再汇报。
 
 QC 诊断：
 
@@ -190,6 +212,113 @@ QC 诊断：
 - `outputs/all_participants_devicewise_baseline_v1_1_plus_neurokit/`
 - `outputs/formal_v1_1_plus_neurokit_unified_baseline/`
 - `outputs/diagnosis_scipy_vs_neurokit_participants/`
+
+## v1.2：允许设备/通道参数不同，并同时报告 green 和 IR
+
+对应文件：
+
+- `formal_freeze_v1_2_report_both_channels.py`
+- `formal_freeze_v1_2_device_channel_params.py`
+
+新的科学边界：
+
+- 总体仍使用同一套透明方法族：从 `ppg_resampled` 重新计算 peaks、IBI、SQI/QC 和 HRV。
+- 参数选择只使用 `training_stride30`。
+- `strict_reference` 只在参数冻结后评估。
+- 不做 subject-level held-out split。
+- 不训练模型，不做跨设备 fusion，不用 ECG label 做逐窗口选择。
+- 允许每个 `device x channel` 使用自己的 peak method / bandpass / IBI correction threshold / QC gate。
+- 不允许 green 和 IR 只选一个最佳；两个通道都冻结、都报告。
+
+当前已完成的非-refinement full-cohort 结果使用现有 `v1_1_plus_neurokit_channel_metrics.csv`，候选包含 SciPy 和 NeuroKit，但不含 full refinement。冻结单位为 `device x channel`。
+
+冻结后的 training_stride30 RMSSD 结果，按 RMSSD MAE 从好到差排序：
+
+| 排名 | 设备 | 通道 | Peak/gate 简写 | training RMSSD MAE | training RMSSD R | training 覆盖率 | training SDNN R |
+|---:|---|---|---|---:|---:|---:|---:|
+| 1 | Ring | `ppg_green` | `scipy_bp07_35_prom025_corr02 + sqi030/ibi080/corr020/cv030` | 11.54 ms | 0.495 | 38.60% | 0.796 |
+| 2 | Watch | `ppg_green` | `scipy_bp07_35_prom025_corr02 + sqi030/ibi090/corr030/cv030` | 14.05 ms | 0.364 | 22.55% | 0.581 |
+| 3 | Ring | `ppg_ir` | `scipy_bp07_35_prom025_corr02 + sqi050/ibi090/corr030/cv030` | 14.42 ms | 0.358 | 23.73% | 0.592 |
+| 4 | Earring | `ppg_ir` | `scipy_bp05_40_prom025_corr02 + sqi050/ibi090/corr020/cv030` | 15.35 ms | 0.428 | 66.39% | 0.852 |
+| 5 | Earring | `ppg_green` | `scipy_bp05_40_prom025_corr02 + sqi030/ibi085/corr020/cv035` | 17.19 ms | 0.414 | 84.22% | 0.928 |
+| 6 | Watch | `ppg_ir` | `scipy_bp07_35_prom025_corr03 + sqi050/ibi070/corr035/cv035` | 68.85 ms | -0.136 | 20.07% | 0.156 |
+
+同一批冻结结果按 SDNN MAE 从好到差排序：
+
+| 排名 | 设备 | 通道 | Peak/gate 简写 | training SDNN MAE | training SDNN R | training 覆盖率 | training RMSSD MAE | training RMSSD R |
+|---:|---|---|---|---:|---:|---:|---:|---:|
+| 1 | Earring | `ppg_green` | `scipy_bp05_40_prom025_corr02 + sqi030/ibi085/corr020/cv035` | 6.02 ms | 0.928 | 84.22% | 17.19 ms | 0.414 |
+| 2 | Earring | `ppg_ir` | `scipy_bp05_40_prom025_corr02 + sqi050/ibi090/corr020/cv030` | 7.51 ms | 0.852 | 66.39% | 15.35 ms | 0.428 |
+| 3 | Ring | `ppg_green` | `scipy_bp07_35_prom025_corr02 + sqi030/ibi080/corr020/cv030` | 10.63 ms | 0.796 | 38.60% | 11.54 ms | 0.495 |
+| 4 | Watch | `ppg_green` | `scipy_bp07_35_prom025_corr02 + sqi030/ibi090/corr030/cv030` | 20.96 ms | 0.581 | 22.55% | 14.05 ms | 0.364 |
+| 5 | Ring | `ppg_ir` | `scipy_bp07_35_prom025_corr02 + sqi050/ibi090/corr030/cv030` | 25.16 ms | 0.592 | 23.73% | 14.42 ms | 0.358 |
+| 6 | Watch | `ppg_ir` | `scipy_bp07_35_prom025_corr03 + sqi050/ibi070/corr035/cv035` | 88.38 ms | 0.156 | 20.07% | 68.85 ms | -0.136 |
+
+解读：
+
+- v1.2 不再把通道选择混成一个 winner-take-all 结果；green 和 IR 的差异直接暴露。
+- Earring 的 IR RMSSD MAE 更低，但 green 覆盖率更高且 SDNN R 更高。
+- Ring 的 green 明显优于 IR。
+- Watch 的 green 仍是可用通道；Watch IR 虽然按 coverage 目标勉强可汇报，但 RMSSD 误差和相关性都很差，不应作为 Watch 的主要结论。
+- 到目前为止，v1.2 的最优冻结项仍主要来自 SciPy，NeuroKit 没有在这些 `device x channel` 冻结项里胜出。
+
+各设备、通道的最佳结果总结：
+
+| 设备 | 最佳 RMSSD 通道 | 最佳 training RMSSD 结果 | 最佳 SDNN 通道 | 最佳 training SDNN 结果 | 结论 |
+|---|---|---|---|---|---|
+| Earring | `ppg_ir` | `15.35 ms` MAE，R `0.428`，覆盖率 `66.39%` | `ppg_green` | `6.02 ms` MAE，R `0.928`，覆盖率 `84.22%` | RMSSD 最佳是 IR；SDNN 和覆盖率最佳是 green，因此 Earring 应同时报告两通道，分别强调不同优势。 |
+| Ring | `ppg_green` | `11.54 ms` MAE，R `0.495`，覆盖率 `38.60%` | `ppg_green` | `10.63 ms` MAE，R `0.796`，覆盖率 `38.60%` | green 在 RMSSD、SDNN、R 和 coverage 上都优于 IR，是 Ring 的主要 baseline 通道。 |
+| Watch | `ppg_green` | `14.05 ms` MAE，R `0.364`，覆盖率 `22.55%` | `ppg_green` | `20.96 ms` MAE，R `0.581`，覆盖率 `22.55%` | green 是 Watch 唯一可作为 baseline 解读的通道；IR 的 RMSSD/SDNN 都明显失败，应保留汇报但不作为主要结论。 |
+
+参与者之间的 R / coverage 波动：
+
+| 设备 | 通道 | participant RMSSD MAE median [min, max] | participant R median [IQR] | participant coverage median [IQR] | coverage range |
+|---|---|---:|---:|---:|---:|
+| Watch | `ppg_green` | 10.36 ms [3.89, 27.94] | 0.325 [0.086, 0.399] | 24.57% [8.19, 28.42] | 3.12-55.56% |
+| Ring | `ppg_green` | 11.31 ms [7.55, 20.72] | 0.414 [0.260, 0.561] | 36.91% [30.59, 45.96] | 17.40-66.52% |
+| Ring | `ppg_ir` | 14.07 ms [7.63, 23.31] | 0.228 [-0.016, 0.490] | 21.34% [15.93, 32.23] | 11.95-52.21% |
+| Earring | `ppg_ir` | 14.84 ms [5.50, 32.38] | 0.282 [0.161, 0.482] | 70.84% [55.91, 85.54] | 29.11-97.54% |
+| Earring | `ppg_green` | 16.07 ms [6.34, 33.37] | 0.206 [0.151, 0.532] | 91.38% [81.07, 95.39] | 34.03-100.00% |
+| Watch | `ppg_ir` | 73.99 ms [46.71, 99.08] | -0.116 [-0.197, 0.302] | 16.56% [14.16, 24.49] | 5.10-41.71% |
+
+说明：
+
+- coverage 的 participant 间波动很大，尤其 Watch green 的范围是 `3.12-55.56%`，Watch IR 是 `5.10-41.71%`；因此 Watch 的总覆盖率低不是均匀下降，而是部分 participant 可用、部分 participant 几乎不可用。
+- R 也有明显 participant 差异。Ring green 的 median R 最高，为 `0.414`；Watch IR 的 median R 为 `-0.116`，即使部分 participant 可过 gate，整体仍应视为失败通道。
+- Earring green 的 participant median coverage 很高（`91.38%`），但 median R 低于 Earring IR；因此它的优势是覆盖率，不是 RMSSD agreement。
+
+motion threshold sensitivity：
+
+当前 v1.2 frozen baseline 已在 `training_stride30` 上按 `accel_motion_mean_mag < 0.1 / 0.2 / 0.5 / 1.0` 重算。阈值过滤是 per `device x channel` 判断，分母是各自 motion 子集内部窗口。
+
+| 设备 | 通道 | Motion windows `<0.1 -> <1.0` | Coverage `<0.1 -> <1.0` | RMSSD MAE `<0.1 -> <1.0` | RMSSD R `<0.1 -> <1.0` | 影响 |
+|---|---|---:|---:|---:|---:|---|
+| Earring | `ppg_green` | 4070 -> 15318 | 93.88% -> 85.59% | 17.66 -> 17.50 ms | 0.375 -> 0.416 | 对 motion threshold 不敏感，主要变化是窗口数增加。 |
+| Earring | `ppg_ir` | 4070 -> 15318 | 88.60% -> 67.42% | 14.83 -> 15.49 ms | 0.403 -> 0.427 | 仍是 Earring 的 RMSSD 最佳通道；放宽阈值后 coverage 下降更明显。 |
+| Ring | `ppg_green` | 372 -> 13229 | 79.57% -> 42.86% | 10.48 -> 11.06 ms | 0.806 -> 0.548 | 严格低运动筛选显著提高 R，但窗口数非常少。 |
+| Ring | `ppg_ir` | 372 -> 13229 | 69.35% -> 25.63% | 12.52 -> 14.22 ms | 0.722 -> 0.472 | 同样受 motion 影响，但始终弱于 Ring green。 |
+| Watch | `ppg_green` | 1295 -> 14820 | 49.88% -> 21.84% | 11.74 -> 14.80 ms | 0.599 -> 0.423 | motion filtering 对 Watch green 帮助最大，但严格阈值牺牲大量窗口。 |
+| Watch | `ppg_ir` | 1295 -> 14820 | 39.92% -> 17.65% | 66.79 -> 76.90 ms | -0.115 -> -0.051 | 所有阈值下仍失败，不能作为 HRV baseline。 |
+
+结论：
+
+- `<0.1` 最能体现 low-motion 下的最好情况，但 Ring/Watch 的窗口数少，代表性有限。
+- `<0.2` 是较平衡的 low-motion sensitivity：Ring green R `0.677`，Watch green R `0.513`，同时窗口数比 `<0.1` 多很多。
+- `<0.5` 和 `<1.0` 更接近 low-to-moderate motion/full training 行为，窗口数多，但 Ring/Watch 的 R 和 motion 子集内 coverage 明显下降。
+- motion threshold 主要解释 Ring green 和 Watch green 的表现波动；Earring 相对稳，Watch IR 无论如何都失败。
+
+对应输出：
+
+- `outputs/formal_v1_2_report_both_channels/`
+- `outputs/formal_v1_2_device_channel_params/`
+- `archive/legacy_current_best_baseline/motion_tests/v1_2_motion_threshold_sensitivity_training_stride30.md`
+- `archive/legacy_current_best_baseline/motion_tests/v1_2_motion_threshold_sensitivity_training_stride30.csv`
+- `archive/legacy_current_best_baseline/motion_tests/v1_2_motion_threshold_sensitivity_participant_training_stride30.csv`
+
+补充：
+
+- `formal_freeze_v1_2_device_channel_params.py` 早先跑过一个“每设备选一个通道”的版本；它只作为中间诊断，不作为当前推荐报告边界。
+- peak refinement full run 本轮尝试过使用 `evaluate_devicewise_recomputed_peaks_v1_1.py --include-refinement` 补算，但该脚本是一次性全量写盘，约 30 分钟仍未产生可用输出，已中断。下一步应改成按 `role + participant` 缓存的 refinement 补算，再并入 `formal_freeze_v1_2_report_both_channels.py` 重新冻结。
 
 ## 归档整理
 
@@ -217,33 +346,11 @@ QC 诊断：
 - 跨设备 fusion、跨设备 best selection 没有进入当前正式 baseline。
 - NeuroKit Elgendi 已完成 full-cohort candidate 比较，但没有成为当前 frozen primary baseline。
 - peak refinement 目前有代码接口和抽样 smoke check，但还没有作为 full-cohort formal primary 结果。
-
-## 计划与疑问
-
-1. 是否处理 Watch 覆盖率低？Earring/Ring 在 unified 规则下被牺牲？
-   - 当前 Watch strict RMSSD 覆盖率只有 22.57%。
-   -  v1.1 device-wise analysis 说明 Earring/Ring 各自使用不同参数时会更好。
-   - 已完成 SciPy vs NeuroKit per-participant diagnosis；Watch 主要瓶颈仍然是 IBI correction ratio，NeuroKit 还增加了 valid IBI failure。
-
-2. 是否做 v1.2 gate-only optimization？
-   - 可以只在现有 recomputed channel metrics 上扩展 gate，例如 `valid_ibi >= 0.70/0.75/0.80`、`cv <= 0.30/0.35/0.40`、`corr <= 0.30/0.35`、`sqi >= 0.35/0.40`。
-   - 目标是提升 Watch 覆盖率，同时不明显牺牲 Earring/Ring。
-   - 仍然必须只在 `training_stride30` 上选 gate，再冻结到 `strict_reference`。
-
-3. 是否使用 NeuroKit 以外的工具？
-   - 可以，但要作为明确候选进入同一套 development/freeze 流程。
-   - 可考虑 HeartPy、MSPTD、qppgfast、pyPPG 或自定义 SciPy refinement。
-   - 不能因为某个工具在 strict_reference 上看起来好就直接替换；必须在 development 上选择并冻结。
-
-5. 是否继续 peak refinement full run？
-   - 当前 NeuroKit full-cohort 结果说明“换 detector”没有解决 Watch 覆盖率问题。
-   - 如果后续 gate-only 仍失败，再考虑 peak refinement full run。
-   - 已有接口是 `evaluate_devicewise_recomputed_peaks_v1_1.py --include-refinement`。
-
-6. 是否需要 subject-level held-out split？
-   - 如果论文要声称泛化到新 participant，仍然需要。
-   - 当前 `training_stride30` 和 `strict_reference` 是同一批 participant 的不同窗口组织方式，不是 subject-independent test。
+  v1.2 这轮尝试了 full refinement 一次性补算，但因运行时间过长且无中间缓存已中断；不把 refinement 当作正式结论。
 
 ## 推荐下一步
 
-先停止继续盲目扩展 detector。下一步建议做 v1.2 gate-only optimization：只读取当前 v1.1 + NeuroKit channel metrics，在 `training_stride30` 上更细地 sweep `valid IBI ratio`、`IBI correction ratio`、`IBI CV` 等 gate，再冻结到 `strict_reference`。
+1. 写一个按 `role + participant` 缓存的 refinement 补算脚本，避免全量任务中断后重来。
+2. 将 refinement channel metrics 与当前 SciPy + NeuroKit full-cohort metrics 合并。
+3. 用 `formal_freeze_v1_2_report_both_channels.py` 重新冻结 `device x channel` 参数。
+4. 若 Watch IR 仍然显著失败，将其作为负面通道结果如实报告，而不是用 best-channel selection 隐藏。

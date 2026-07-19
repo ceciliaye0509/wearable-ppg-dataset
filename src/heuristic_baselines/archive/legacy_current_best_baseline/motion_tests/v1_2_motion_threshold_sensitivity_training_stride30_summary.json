@@ -1,0 +1,13 @@
+{
+  "channel_metrics_csv": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/outputs/all_participants_devicewise_baseline_v1_1_plus_neurokit/v1_1_plus_neurokit_channel_metrics.csv",
+  "frozen_choices_csv": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/outputs/formal_v1_2_report_both_channels/v1_2_both_channels_frozen_choices.csv",
+  "thresholds": [
+    0.1,
+    0.2,
+    0.5,
+    1.0
+  ],
+  "role": "training_stride30",
+  "motion_column": "accel_motion_mean_mag",
+  "reports_both_channels": true
+}

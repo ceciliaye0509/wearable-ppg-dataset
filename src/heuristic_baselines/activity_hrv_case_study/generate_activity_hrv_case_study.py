@@ -85,29 +85,37 @@ def normalize_text(text: str) -> str:
 # 将自由文本 activity log 粗分成少数可汇总类别。
 def categorize_activity(text: str) -> str:
     t = normalize_text(text)
+    if any(w in t for w in ["feeling very tired", "feeling tired", "very tired"]):
+        return "symptom_fatigue"
+    if any(w in t for w in ["focus", "coding frustration", "discussion about phd"]):
+        return "work_study"
+    if any(w in t for w in ["fixing bike"]):
+        return "exercise"
+    if any(w in t for w in ["grocery store", "shopping"]):
+        return "walking"
     if any(w in t for w in ["sleep", "nap", "napping"]):
         return "sleep"
     if any(w in t for w in ["yoga", "breathing"]):
         return "rest_sitting"
     if "incline walk" in t:
         return "walking"
-    if any(w in t for w in ["run", "treadmill", "exercise"]):
-        return "exercise"
-    if any(w in t for w in ["walk", "walking"]):
-        return "walking"
-    if any(w in t for w in ["drive", "driving", "drivign", "light rail", "bus"]):
-        return "transport"
-    if any(w in t for w in ["eat", "dinner", "ramen", "dessert", "coffee", "water", "restaurant", "tangerine", "cooking", "warming up", "lunch", "food"]):
+    if any(w in t for w in ["eat", "dinner", "ramen", "dessert", "coffee", "water", "restaurant", "tangerine", "cooking", "warming up", "lunch", "food", "drinking", "apple"]):
         return "eating_drinking"
+    if re.search(r"\b(run|running|treadmill|exercise|rowing|lifting)\b", t):
+        return "exercise"
+    if any(w in t for w in ["walk", "walking", "stairs"]):
+        return "walking"
+    if any(w in t for w in ["drive", "driving", "drivign", "light rail", "bus", "bike", "biking"]):
+        return "transport"
     if any(w in t for w in ["stress", "stressed"]):
         return "stress"
-    if any(w in t for w in ["homework", "study", "stduy", "working", "work", "laptop", "writing", "class", "meeting", "zoom"]):
+    if any(w in t for w in ["homework", "study", "stduy", "working", "work", "laptop", "writing", "class", "meeting", "zoom", "lecture", "typing", "textbook", "quiz", "duolingo", "eval", "reading"]):
         return "work_study"
     if any(w in t for w in ["sitting", "sit", "laying", "bed", "couch"]):
         return "rest_sitting"
-    if any(w in t for w in ["chat", "talk", "music", "mysic", "youtube", "youtueb", "watching", "drama", "phone", "relax", "play"]):
+    if any(w in t for w in ["chat", "talk", "music", "mysic", "youtube", "youtueb", "watching", "drama", "phone", "relax", "play", "piano", "listening"]):
         return "social_entertainment"
-    if any(w in t for w in ["hair", "pajama", "changing", "peeling"]):
+    if any(w in t for w in ["hair", "pajama", "changing", "peeling", "change clothes", "getting dressed"]):
         return "personal_care"
     return "other"
 
