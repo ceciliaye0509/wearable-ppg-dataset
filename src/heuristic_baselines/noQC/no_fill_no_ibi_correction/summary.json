@@ -1,0 +1,14 @@
+{
+  "policy": "v1_2_frozen_peak_methods_no_qc_no_fill_no_ibi_correction_training_stride30",
+  "role": "training_stride30",
+  "dataset_dir": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/outputs/synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_ecgsample100_stride30",
+  "frozen_choices_csv": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/outputs/formal_v1_2_report_both_channels/v1_2_both_channels_frozen_choices.csv",
+  "standard_noqc_csv": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/noQC/v1_2_noQC_training_stride30_eval.csv",
+  "quality_checks_applied": false,
+  "baseline_fill_missing_applied": false,
+  "ibi_artifact_correction_applied": false,
+  "peak_interpolation_refinement_applied": false,
+  "dataset_level_ppg_resampling_applied": true,
+  "reports_green_and_ir": true,
+  "validity_requirement": "finite PPG and ECG HRV metric values"
+}

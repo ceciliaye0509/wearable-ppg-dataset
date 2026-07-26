@@ -9,6 +9,10 @@ src/model_baselines/log/
 src/model_baselines/predictions/
 src/model_baselines/results/
 
+# IDE / editors
+.vscode/
+.ipynb_checkpoints/
+
 # Python
 __pycache__/
 *.py[cod]

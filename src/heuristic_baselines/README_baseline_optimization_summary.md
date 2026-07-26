@@ -44,13 +44,13 @@ n_valid = PPG HRV 和 ECG HRV 都是有限值，且该窗口通过 frozen QC gat
 1. detector / bandpass / peak method 是否能从 `ppg_resampled` 产生足够 peaks，并计算出有限的 PPG RMSSD/SDNN。
 2. 该窗口是否通过已冻结的 quality gate，例如 `ppg_valid_sample_ratio`、SQI、valid IBI ratio、IBI correction ratio、IBI CV、RMSSD 上限等。
 
-motion threshold sensitivity 的口径略有不同：分母不是完整 `training_stride30`，而是先筛选 `accel_motion_mean_mag < threshold` 后的 motion 子集。
+motion threshold sensitivity 的口径略有不同：分母不是完整 `training_stride30`，而是先取同一批 common-motion windows。具体做法是：每个 threshold 先取所有汇报的 `device x channel` 都满足 `accel_motion_mean_mag < threshold` 的 `participant + window_index` 交集，再在这批 common-motion windows 内计算各通道 QC-valid coverage、MAE 和 R。
 
 ```text
-coverage_within_motion = n_valid_after_QC_inside_motion_subset / n_windows_inside_motion_subset
+coverage_within_motion = n_valid_after_QC_inside_common_motion_subset / n_common_motion_windows
 ```
 
-所以 motion 表中的 coverage 只能解释“在该 motion 子集内部，baseline 能保留多少窗口”，不能直接和完整 training_stride30 coverage 混为一谈。
+所以 motion 表中的 coverage 只能解释“在同一批 common-motion 子集内部，baseline 能保留多少窗口”，不能直接和完整 training_stride30 coverage 混为一谈。
 
 noQC ablation 的详细 coverage 口径和结果移到 `noQC/README.md`。简短地说，noQC coverage 衡量 frozen detector/bandpass 能产出有限 HRV 的上限；coverage 上升不一定代表 HRV agreement 变好，仍必须和 MAE、R、bias 一起解释。
 
@@ -232,27 +232,27 @@ QC 诊断：
 
 当前已完成的非-refinement full-cohort 结果使用现有 `v1_1_plus_neurokit_channel_metrics.csv`，候选包含 SciPy 和 NeuroKit，但不含 full refinement。冻结单位为 `device x channel`。
 
-冻结后的 training_stride30 RMSSD 结果，按 RMSSD MAE 从好到差排序：
+冻结后的 training_stride30 RMSSD 结果，按 RMSSD MAE 从好到差排序。这里的 Coverage 是完整 `training_stride30` common-window 原始分母 `17064` 下的 QC-valid 覆盖率；MAE/R 在各通道 QC-valid 窗口上计算。
 
-| 排名 | 设备 | 通道 | Peak/gate 简写 | training RMSSD MAE | training RMSSD R | training 覆盖率 | training SDNN R |
-|---:|---|---|---|---:|---:|---:|---:|
-| 1 | Ring | `ppg_green` | `scipy_bp07_35_prom025_corr02 + sqi030/ibi080/corr020/cv030` | 11.54 ms | 0.495 | 38.60% | 0.796 |
-| 2 | Watch | `ppg_green` | `scipy_bp07_35_prom025_corr02 + sqi030/ibi090/corr030/cv030` | 14.05 ms | 0.364 | 22.55% | 0.581 |
-| 3 | Ring | `ppg_ir` | `scipy_bp07_35_prom025_corr02 + sqi050/ibi090/corr030/cv030` | 14.42 ms | 0.358 | 23.73% | 0.592 |
-| 4 | Earring | `ppg_ir` | `scipy_bp05_40_prom025_corr02 + sqi050/ibi090/corr020/cv030` | 15.35 ms | 0.428 | 66.39% | 0.852 |
-| 5 | Earring | `ppg_green` | `scipy_bp05_40_prom025_corr02 + sqi030/ibi085/corr020/cv035` | 17.19 ms | 0.414 | 84.22% | 0.928 |
-| 6 | Watch | `ppg_ir` | `scipy_bp07_35_prom025_corr03 + sqi050/ibi070/corr035/cv035` | 68.85 ms | -0.136 | 20.07% | 0.156 |
+| 排名 | 设备 | 通道 | Peak/gate 简写 | RMSSD MAE | RMSSD R | Coverage |
+|---:|---|---|---|---:|---:|---:|
+| 1 | Ring | `ppg_green` | `bp07_35_prom025_corr02 + sqi030/ibi080/corr020/cv030` | 11.54 ms | 0.495 | 38.60% |
+| 2 | Watch | `ppg_green` | `bp07_35_prom025_corr02 + sqi030/ibi090/corr030/cv030` | 14.05 ms | 0.364 | 22.55% |
+| 3 | Ring | `ppg_ir` | `bp07_35_prom025_corr02 + sqi050/ibi090/corr030/cv030` | 14.42 ms | 0.358 | 23.73% |
+| 4 | Earring | `ppg_ir` | `bp05_40_prom025_corr02 + sqi050/ibi090/corr020/cv030` | 15.35 ms | 0.428 | 66.39% |
+| 5 | Earring | `ppg_green` | `bp05_40_prom025_corr02 + sqi030/ibi085/corr020/cv035` | 17.19 ms | 0.414 | 84.22% |
+| 6 | Watch | `ppg_ir` | `bp07_35_prom025_corr03 + sqi050/ibi070/corr035/cv035` | 68.85 ms | -0.136 | 20.07% |
 
 同一批冻结结果按 SDNN MAE 从好到差排序：
 
-| 排名 | 设备 | 通道 | Peak/gate 简写 | training SDNN MAE | training SDNN R | training 覆盖率 | training RMSSD MAE | training RMSSD R |
-|---:|---|---|---|---:|---:|---:|---:|---:|
-| 1 | Earring | `ppg_green` | `scipy_bp05_40_prom025_corr02 + sqi030/ibi085/corr020/cv035` | 6.02 ms | 0.928 | 84.22% | 17.19 ms | 0.414 |
-| 2 | Earring | `ppg_ir` | `scipy_bp05_40_prom025_corr02 + sqi050/ibi090/corr020/cv030` | 7.51 ms | 0.852 | 66.39% | 15.35 ms | 0.428 |
-| 3 | Ring | `ppg_green` | `scipy_bp07_35_prom025_corr02 + sqi030/ibi080/corr020/cv030` | 10.63 ms | 0.796 | 38.60% | 11.54 ms | 0.495 |
-| 4 | Watch | `ppg_green` | `scipy_bp07_35_prom025_corr02 + sqi030/ibi090/corr030/cv030` | 20.96 ms | 0.581 | 22.55% | 14.05 ms | 0.364 |
-| 5 | Ring | `ppg_ir` | `scipy_bp07_35_prom025_corr02 + sqi050/ibi090/corr030/cv030` | 25.16 ms | 0.592 | 23.73% | 14.42 ms | 0.358 |
-| 6 | Watch | `ppg_ir` | `scipy_bp07_35_prom025_corr03 + sqi050/ibi070/corr035/cv035` | 88.38 ms | 0.156 | 20.07% | 68.85 ms | -0.136 |
+| 排名 | 设备 | 通道 | Peak/gate 简写 | SDNN MAE | SDNN R | Coverage |
+|---:|---|---|---|---:|---:|---:|
+| 1 | Earring | `ppg_green` | `bp05_40_prom025_corr02 + sqi030/ibi085/corr020/cv035` | 6.02 ms | 0.928 | 84.22% |
+| 2 | Earring | `ppg_ir` | `bp05_40_prom025_corr02 + sqi050/ibi090/corr020/cv030` | 7.51 ms | 0.852 | 66.39% |
+| 3 | Ring | `ppg_green` | `bp07_35_prom025_corr02 + sqi030/ibi080/corr020/cv030` | 10.63 ms | 0.796 | 38.60% |
+| 4 | Watch | `ppg_green` | `bp07_35_prom025_corr02 + sqi030/ibi090/corr030/cv030` | 20.96 ms | 0.581 | 22.55% |
+| 5 | Ring | `ppg_ir` | `bp07_35_prom025_corr02 + sqi050/ibi090/corr030/cv030` | 25.16 ms | 0.592 | 23.73% |
+| 6 | Watch | `ppg_ir` | `bp07_35_prom025_corr03 + sqi050/ibi070/corr035/cv035` | 88.38 ms | 0.156 | 20.07% |
 
 解读：
 
@@ -289,23 +289,23 @@ QC 诊断：
 
 motion threshold sensitivity：
 
-当前 v1.2 frozen baseline 已在 `training_stride30` 上按 `accel_motion_mean_mag < 0.1 / 0.2 / 0.5 / 1.0` 重算。阈值过滤是 per `device x channel` 判断，分母是各自 motion 子集内部窗口。
+当前 v1.2 frozen baseline 已在 `training_stride30` 上按 `accel_motion_mean_mag < 0.1 / 0.2 / 0.5 / 1.0` 重算。阈值过滤已改为 common-window intersection：每个 threshold 先取所有汇报的 `device x channel` 都满足 motion 条件的同一批 `participant + window_index`，分母是 common-motion windows。
 
-| 设备 | 通道 | Motion windows `<0.1 -> <1.0` | Coverage `<0.1 -> <1.0` | RMSSD MAE `<0.1 -> <1.0` | RMSSD R `<0.1 -> <1.0` | 影响 |
+| 设备 | 通道 | Common motion windows `<0.1 -> <1.0` | Coverage `<0.1 -> <1.0` | RMSSD MAE `<0.1 -> <1.0` | RMSSD R `<0.1 -> <1.0` | 影响 |
 |---|---|---:|---:|---:|---:|---|
-| Earring | `ppg_green` | 4070 -> 15318 | 93.88% -> 85.59% | 17.66 -> 17.50 ms | 0.375 -> 0.416 | 对 motion threshold 不敏感，主要变化是窗口数增加。 |
-| Earring | `ppg_ir` | 4070 -> 15318 | 88.60% -> 67.42% | 14.83 -> 15.49 ms | 0.403 -> 0.427 | 仍是 Earring 的 RMSSD 最佳通道；放宽阈值后 coverage 下降更明显。 |
-| Ring | `ppg_green` | 372 -> 13229 | 79.57% -> 42.86% | 10.48 -> 11.06 ms | 0.806 -> 0.548 | 严格低运动筛选显著提高 R，但窗口数非常少。 |
-| Ring | `ppg_ir` | 372 -> 13229 | 69.35% -> 25.63% | 12.52 -> 14.22 ms | 0.722 -> 0.472 | 同样受 motion 影响，但始终弱于 Ring green。 |
-| Watch | `ppg_green` | 1295 -> 14820 | 49.88% -> 21.84% | 11.74 -> 14.80 ms | 0.599 -> 0.423 | motion filtering 对 Watch green 帮助最大，但严格阈值牺牲大量窗口。 |
-| Watch | `ppg_ir` | 1295 -> 14820 | 39.92% -> 17.65% | 66.79 -> 76.90 ms | -0.115 -> -0.051 | 所有阈值下仍失败，不能作为 HRV baseline。 |
+| Earring | `ppg_green` | 118 -> 13201 | 97.46% -> 86.14% | 9.17 -> 17.08 ms | 0.762 -> 0.436 | common low-motion 子集下误差最低；阈值放宽后样本更充分但 MAE 上升。 |
+| Earring | `ppg_ir` | 118 -> 13201 | 96.61% -> 70.96% | 9.34 -> 15.54 ms | 0.660 -> 0.442 | common low-motion 子集下接近 green；阈值放宽后仍是 Earring 的主要 RMSSD 通道。 |
+| Ring | `ppg_green` | 118 -> 13201 | 64.41% -> 42.95% | 12.25 -> 11.06 ms | 0.733 -> 0.548 | 在 common-motion 横向比较中保持 Ring 最佳；严格阈值样本很少。 |
+| Ring | `ppg_ir` | 118 -> 13201 | 56.78% -> 25.64% | 13.94 -> 14.18 ms | 0.270 -> 0.474 | coverage 和 RMSSD agreement 均弱于 Ring green；严格阈值下 R 不稳定。 |
+| Watch | `ppg_green` | 118 -> 13201 | 41.53% -> 24.10% | 12.26 -> 14.70 ms | 0.403 -> 0.431 | Watch 的可用通道；common-motion 下 coverage 仍明显低于 Earring/Ring green。 |
+| Watch | `ppg_ir` | 118 -> 13201 | 61.02% -> 18.47% | 47.42 -> 77.23 ms | -0.515 -> -0.039 | 即使使用 common low-motion 子集，IR 仍明显失败。 |
 
 结论：
 
-- `<0.1` 最能体现 low-motion 下的最好情况，但 Ring/Watch 的窗口数少，代表性有限。
-- `<0.2` 是较平衡的 low-motion sensitivity：Ring green R `0.677`，Watch green R `0.513`，同时窗口数比 `<0.1` 多很多。
-- `<0.5` 和 `<1.0` 更接近 low-to-moderate motion/full training 行为，窗口数多，但 Ring/Watch 的 R 和 motion 子集内 coverage 明显下降。
-- motion threshold 主要解释 Ring green 和 Watch green 的表现波动；Earring 相对稳，Watch IR 无论如何都失败。
+- `<0.1` 最能体现 common low-motion 下的最好情况，但 common windows 只有 `118`，代表性有限。
+- `<0.2` 是较平衡的 common low-motion sensitivity：common windows 增至 `1367`，Ring green R `0.731`，Watch green R `0.616`。
+- `<0.5` 和 `<1.0` 更接近 common low-to-moderate motion/full training 行为，窗口数多，但 Ring/Watch 的 motion 子集内 coverage 仍明显低于 Earring。
+- motion threshold 主要解释低运动 common subset 中各通道表现如何变化；Watch IR 无论如何都失败。
 
 对应输出：
 

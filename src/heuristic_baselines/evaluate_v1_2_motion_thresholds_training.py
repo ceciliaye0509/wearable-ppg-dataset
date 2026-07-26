@@ -2,7 +2,8 @@
 Evaluate v1.2 frozen device/channel baseline under training motion thresholds.
 
 This script reads existing full-cohort channel metrics, applies the frozen
-device x channel v1.2 choices, filters `training_stride30` windows by
+device x channel v1.2 choices, filters `training_stride30` windows by a
+common-window intersection where every reported device x channel satisfies
 `accel_motion_mean_mag < threshold`, and writes threshold-specific CSV/MD
 reports plus an overall sensitivity summary.
 """
@@ -43,17 +44,17 @@ def _threshold_label(value: object) -> str:
 
 def _impact_note(device: str, channel: str) -> str:
     if device == "Earring" and channel == "ppg_green":
-        return "阈值放宽后窗口数增加很多，MAE/R 基本稳定，coverage 小幅下降。"
+        return "common low-motion 子集下误差最低；阈值放宽后样本更充分但 MAE 上升。"
     if device == "Earring" and channel == "ppg_ir":
-        return "IR 保持 Earring 的 RMSSD 最佳通道；放宽阈值主要降低 coverage，误差只小幅变差。"
+        return "common low-motion 子集下接近 green；阈值放宽后仍是 Earring 的主要 RMSSD 通道。"
     if device == "Ring" and channel == "ppg_green":
-        return "严格 motion gate 明显提高 R 并降低 MAE，但代价是只保留很少窗口。"
+        return "在 common-motion 横向比较中保持 Ring 最佳；严格阈值样本很少。"
     if device == "Ring" and channel == "ppg_ir":
-        return "与 Ring green 同方向，但始终弱于 green。"
+        return "coverage 和 RMSSD agreement 均弱于 Ring green；严格阈值下 R 不稳定。"
     if device == "Watch" and channel == "ppg_green":
-        return "motion filtering 对 Watch green 帮助最大：严格阈值显著改善 RMSSD MAE/R，但窗口数大幅减少。"
+        return "Watch 的可用通道；common-motion 下 coverage 仍明显低于 Earring/Ring green。"
     if device == "Watch" and channel == "ppg_ir":
-        return "即使在低 motion 子集，IR 仍失败；motion filtering 不能修复 Watch IR。"
+        return "即使使用 common low-motion 子集，IR 仍明显失败。"
     return "用于比较阈值放宽时窗口数、coverage、MAE 和 R 的变化。"
 
 
@@ -96,6 +97,19 @@ def _load_frozen_predictions(metrics: pd.DataFrame, choices: pd.DataFrame) -> pd
     return pd.concat(pieces, ignore_index=True) if pieces else pd.DataFrame()
 
 
+def _common_motion_subset(pred: pd.DataFrame, threshold: float) -> pd.DataFrame:
+    motion_pass = pred[pred["accel_motion_mean_mag"].astype(float) < threshold].copy()
+    required_pairs = pred[["device", "channel"]].drop_duplicates().shape[0]
+    common_counts = motion_pass.groupby(["participant", "window_index"], dropna=False)[["device", "channel"]].apply(
+        lambda x: x.drop_duplicates().shape[0]
+    )
+    common_keys = common_counts[common_counts == required_pairs].index
+    if len(common_keys) == 0:
+        return pred.iloc[0:0].copy()
+    common_key_df = pd.DataFrame(list(common_keys), columns=["participant", "window_index"])
+    return pred.merge(common_key_df, on=["participant", "window_index"], how="inner").copy()
+
+
 def _summarize(
     pred: pd.DataFrame,
     threshold: float,
@@ -103,7 +117,7 @@ def _summarize(
     rows: list[dict[str, object]] = []
     participant_rows: list[dict[str, object]] = []
 
-    motion_subset = pred[pred["accel_motion_mean_mag"].astype(float) < threshold].copy()
+    motion_subset = _common_motion_subset(pred, threshold)
     valid_pred = motion_subset[motion_subset["frozen_gate_pass"]].copy()
 
     for keys, total_group in motion_subset.groupby(["device", "channel"], dropna=False):
@@ -118,7 +132,7 @@ def _summarize(
             rows.append(
                 {
                     "motion_threshold": threshold,
-                    "motion_filter": f"accel_motion_mean_mag < {_threshold_label(threshold)}",
+                    "motion_filter": f"common-window all device/channel accel_motion_mean_mag < {_threshold_label(threshold)}",
                     "role": "training_stride30",
                     "device": device,
                     "channel": channel,
@@ -145,7 +159,7 @@ def _summarize(
             participant_rows.append(
                 {
                     "motion_threshold": threshold,
-                    "motion_filter": f"accel_motion_mean_mag < {_threshold_label(threshold)}",
+                    "motion_filter": f"common-window all device/channel accel_motion_mean_mag < {_threshold_label(threshold)}",
                     "role": "training_stride30",
                     "participant": participant,
                     "device": device,
@@ -185,11 +199,12 @@ def _write_threshold_md(out_path: Path, threshold: float, summary: pd.DataFrame,
     lines = [
         f"# v1.2 Baseline Motion Threshold < {threshold_text}",
         "",
-        "本报告只使用 `training_stride30`，并按每个 `device x channel` 独立应用 motion filter。",
+        "本报告只使用 `training_stride30`，并先取同一批 `participant + window_index` common-window 交集。",
         "",
-        f"- Motion filter: `accel_motion_mean_mag < {threshold_text}`",
+        f"- Motion filter: all reported `device x channel` rows satisfy `accel_motion_mean_mag < {threshold_text}`.",
         "- Baseline: frozen v1.2 device x channel parameters, both green and IR reported.",
-        "- Denominator: windows inside this motion subset for that device/channel.",
+        "- Denominator: the same common-motion windows for every device/channel at this threshold.",
+        "- MAE/R are computed on each device/channel's QC-valid predictions inside this common-motion subset.",
         "",
         "## Aggregate Results",
         "",
@@ -270,9 +285,11 @@ def _write_overall_md(out_dir: Path, all_summary: pd.DataFrame) -> None:
         "",
         "本汇总使用当前 v1.2 最佳 baseline：每个 `device x channel` 使用冻结参数，并且 green/IR 都汇报。",
         "",
+        "Motion threshold 横向比较使用同一批窗口交集：每个 threshold 先取所有汇报的 `device x channel` 都满足 `accel_motion_mean_mag < threshold` 的 `participant + window_index`，再在这批 common-motion windows 内计算各通道 QC-valid coverage、MAE 和 R。",
+        "",
         "## Threshold Impact Comparison",
         "",
-        "下表比较 motion threshold 从严格到宽松时，对当前 baseline 的影响。Coverage 使用 motion 子集内部窗口作分母。",
+        "下表比较 motion threshold 从严格到宽松时，对当前 baseline 的影响。Coverage 使用同一批 common-motion windows 作分母。",
         "",
         f"| Device | Channel | Motion windows `<{strict_label} -> <{loose_label}` | Coverage `<{strict_label} -> <{loose_label}` | RMSSD MAE `<{strict_label} -> <{loose_label}` | RMSSD R `<{strict_label} -> <{loose_label}` | 主要影响 |",
         "|---|---|---:|---:|---:|---:|---|",
@@ -291,10 +308,10 @@ def _write_overall_md(out_dir: Path, all_summary: pd.DataFrame) -> None:
         "",
         "核心结论：",
         "",
-        "- `<0.1` 是最严格的 low-motion 子集，Ring green 和 Watch green 的 RMSSD R 最高，但 Ring/Watch 的窗口数少，代表性有限。",
-        "- `<0.2` 是更平衡的 low-motion sensitivity：窗口数明显多于 `<0.1`，同时 Ring green 和 Watch green 仍保留较好的 R。",
-        "- `<0.5` 和 `<1.0` 更接近 low-to-moderate motion/full training 行为，窗口数多，但 Ring/Watch 的 R 和 coverage within motion 明显下降。",
-        "- 对当前 v1.2 baseline，motion threshold 的主要收益集中在 Ring green 和 Watch green；Earring 相对稳，Watch IR 始终不适合作为 HRV baseline。",
+        "- `<0.1` 是最严格的 common low-motion 子集，窗口数很少，代表性有限。",
+        "- `<0.2` 是更平衡的 common low-motion sensitivity：窗口数明显多于 `<0.1`。",
+        "- `<0.5` 和 `<1.0` 更接近 common low-to-moderate motion/full training 行为，窗口数多，但 Ring/Watch 的 coverage within motion 仍明显低于 Earring。",
+        "- 对当前 v1.2 baseline，common low-motion 子集会改变各通道 RMSSD 排序；Watch IR 始终不适合作为 HRV baseline。",
         "",
         "## Aggregate RMSSD/SDNN Results",
         "",
@@ -327,12 +344,12 @@ def _write_overall_md(out_dir: Path, all_summary: pd.DataFrame) -> None:
         "",
         "## Interpretation",
         "",
-        "- 更严格的 motion threshold 通常提升 Ring/Watch 的 RMSSD R、降低 MAE，但会牺牲大量 motion windows。",
+        "- 更严格的 common motion threshold 通常提升部分通道的 RMSSD R、降低 MAE，但会牺牲大量 motion windows。",
         "- Earring green/IR 在低 motion 子集下保留较多窗口，说明 Earring 的 motion 分布相对更温和；但 RMSSD agreement 仍通常是 IR 更好，SDNN 通常是 green 更好。",
         "- Ring green 在所有阈值下都是 Ring 的最佳通道；Ring IR 保留汇报，但 MAE/R/coverage 都弱于 green。",
-        "- Watch green 是最受 motion threshold 影响的可用通道：`<0.1` 下表现明显改善，但这更多是 low-motion subset analysis，不代表全训练集表现。",
+        "- Watch green 是最受 motion threshold 影响的可用通道之一；严格阈值下样本量很小，因此不能单独代表全训练集表现。",
         "- Watch IR 在所有阈值下仍明显失败；motion filtering 不能把 Watch IR 修成可用 HRV baseline。",
-        "- Coverage within motion 使用 motion 子集作为分母，不能直接和完整 training_stride30 overall coverage 混为一谈。",
+        "- Coverage within motion 使用 common-motion 子集作为分母，不能直接和完整 training_stride30 overall coverage 混为一谈。",
         "",
         "## Files",
         "",

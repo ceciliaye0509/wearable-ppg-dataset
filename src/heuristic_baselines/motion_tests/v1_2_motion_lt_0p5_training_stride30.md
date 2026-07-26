@@ -1,32 +1,33 @@
 # v1.2 Baseline Motion Threshold < 0.5
 
-本报告只使用 `training_stride30`，并按每个 `device x channel` 独立应用 motion filter。
+本报告只使用 `training_stride30`，并先取同一批 `participant + window_index` common-window 交集。
 
-- Motion filter: `accel_motion_mean_mag < 0.5`
+- Motion filter: all reported `device x channel` rows satisfy `accel_motion_mean_mag < 0.5`.
 - Baseline: frozen v1.2 device x channel parameters, both green and IR reported.
-- Denominator: windows inside this motion subset for that device/channel.
+- Denominator: the same common-motion windows for every device/channel at this threshold.
+- MAE/R are computed on each device/channel's QC-valid predictions inside this common-motion subset.
 
 ## Aggregate Results
 
 | Rank | Device | Channel | Motion windows | Valid preds | Coverage within motion | RMSSD MAE | RMSSD R | SDNN MAE | SDNN R |
 |---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| 1 | `Ring` | `ppg_green` | 8292 | 4540 | 54.75% | 10.83 ms | 0.580 | 11.06 ms | 0.779 |
-| 2 | `Ring` | `ppg_ir` | 8292 | 3053 | 36.82% | 14.14 ms | 0.476 | 27.13 ms | 0.597 |
-| 3 | `Watch` | `ppg_green` | 12539 | 3177 | 25.34% | 14.78 ms | 0.424 | 21.31 ms | 0.598 |
-| 4 | `Earring` | `ppg_ir` | 14411 | 9824 | 68.17% | 15.50 ms | 0.421 | 7.49 ms | 0.856 |
-| 5 | `Earring` | `ppg_green` | 14411 | 12388 | 85.96% | 17.47 ms | 0.415 | 6.08 ms | 0.931 |
-| 6 | `Watch` | `ppg_ir` | 12539 | 2341 | 18.67% | 77.19 ms | -0.051 | 96.16 ms | 0.151 |
+| 1 | `Ring` | `ppg_green` | 7996 | 4395 | 54.96% | 10.79 ms | 0.590 | 11.15 ms | 0.780 |
+| 2 | `Ring` | `ppg_ir` | 7996 | 2919 | 36.51% | 14.23 ms | 0.492 | 27.17 ms | 0.607 |
+| 3 | `Watch` | `ppg_green` | 7996 | 2642 | 33.04% | 14.39 ms | 0.443 | 20.69 ms | 0.596 |
+| 4 | `Earring` | `ppg_ir` | 7996 | 6321 | 79.05% | 14.84 ms | 0.489 | 7.71 ms | 0.838 |
+| 5 | `Earring` | `ppg_green` | 7996 | 7251 | 90.68% | 16.35 ms | 0.489 | 5.96 ms | 0.922 |
+| 6 | `Watch` | `ppg_ir` | 7996 | 1925 | 24.07% | 74.78 ms | -0.039 | 93.11 ms | 0.158 |
 
 ## Participant R/Coverage Variability
 
 | Device | Channel | Participant R median [IQR] | Participant coverage median [IQR] |
 |---|---|---:|---:|
-| `Earring` | `ppg_green` | 0.211 [0.112, 0.538] | 92.41% [82.38, 96.65] |
-| `Earring` | `ppg_ir` | 0.288 [0.131, 0.483] | 71.84% [60.05, 87.08] |
-| `Ring` | `ppg_green` | 0.423 [0.119, 0.561] | 54.99% [45.26, 66.28] |
-| `Ring` | `ppg_ir` | 0.235 [-0.023, 0.486] | 38.02% [29.05, 51.63] |
-| `Watch` | `ppg_green` | 0.327 [0.012, 0.428] | 22.43% [8.24, 33.99] |
-| `Watch` | `ppg_ir` | -0.166 [-0.269, 0.240] | 18.15% [10.95, 21.01] |
+| `Earring` | `ppg_green` | 0.272 [0.087, 0.641] | 95.12% [88.61, 97.29] |
+| `Earring` | `ppg_ir` | 0.317 [0.186, 0.518] | 75.40% [66.77, 92.36] |
+| `Ring` | `ppg_green` | 0.425 [0.119, 0.561] | 58.87% [45.39, 66.49] |
+| `Ring` | `ppg_ir` | 0.235 [0.109, 0.486] | 38.98% [29.13, 53.16] |
+| `Watch` | `ppg_green` | 0.325 [-0.117, 0.372] | 28.77% [8.33, 54.43] |
+| `Watch` | `ppg_ir` | -0.214 [-0.274, 0.213] | 21.04% [16.64, 25.65] |
 
 ## Output
 
