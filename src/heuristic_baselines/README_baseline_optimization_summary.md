@@ -156,7 +156,7 @@ v1.1 formal 的 training_stride30 结果与 v1 formal 相同，按 RMSSD MAE 从
 
 - `evaluate_neurokit_fullcohort_cached_v1_1.py`
 - `formal_freeze_v1_1_unified_baseline.py`
-- `diagnose_scipy_vs_neurokit_participants.py`
+- `archive/diagnostics/diagnose_scipy_vs_neurokit_participants.py`
 - `README_neurokit_fullcohort_comparison.md`
 
 执行的三步：
@@ -172,7 +172,7 @@ v1.1 formal 的 training_stride30 结果与 v1 formal 相同，按 RMSSD MAE 从
   - `nk_elgendi_bp07_35_doubleclean_corr02`
 - 为了避免长任务中断后重跑，`evaluate_neurokit_fullcohort_cached_v1_1.py` 按 `role + participant` 写缓存。
 - 合并后生成 `outputs/all_participants_devicewise_baseline_v1_1_plus_neurokit/v1_1_plus_neurokit_channel_metrics.csv`，再用 formal freeze 脚本只在 `training_stride30` 上重新选择统一规则。
-- `diagnose_scipy_vs_neurokit_participants.py` 只读取已有结果，不重新计算 peaks，用于比较 participant/device 级误差和 QC 失败原因。
+- `archive/diagnostics/diagnose_scipy_vs_neurokit_participants.py` 只读取已有结果，不重新计算 peaks，用于比较 participant/device 级误差和 QC 失败原因。
 
 formal unified 结果：
 

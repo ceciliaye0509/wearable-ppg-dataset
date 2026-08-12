@@ -256,9 +256,9 @@ Hugging Face `snowballlab/HRV` 当前最终版保留 3 个数据集目录。
 
 | 数据集 | 用途 | stride | 本地状态 |
 |---|---|---:|---|
-| `synced_3device_rawaligned_strict_reference_100hz_ecgibi100_sample90_ecgsample100` | strict reference / evaluation | `300 s` | 本地保留 |
-| `synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_ecgsample100` | training | `60 s` | HF 保留，本地已清理 |
-| `synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_ecgsample100_stride30` | training | `30 s` | 本地保留 |
+| `synced_3device_rawaligned_strict_reference_100hz_ecgibi100_sample90_ecgsample100` | strict reference / evaluation | `300 s` | 已有副本；本地已于 2026-08-12 清理 |
+| `synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_ecgsample100` | training | `60 s` | 已有副本；本地已清理 |
+| `synced_3device_rawaligned_training_v1_100hz_ecgibi100_sample90_ecgsample100_stride30` | training | `30 s` | 已有副本；本地已于 2026-08-12 清理 |
 
 本地已确认：
 
