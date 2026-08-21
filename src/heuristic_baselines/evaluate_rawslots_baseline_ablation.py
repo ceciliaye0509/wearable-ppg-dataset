@@ -229,11 +229,12 @@ def _detect_scipy_peaks_segmented(signal: np.ndarray, fs: float, method: Method,
     return np.concatenate(peaks).astype(np.int64) if peaks else np.empty(0, dtype=np.int64)
 
 
-def _score_peak_train(peaks: np.ndarray, times_ms: np.ndarray) -> float:
-    peaks = np.asarray(peaks, dtype=np.int64)
-    if peaks.size < 3:
+def _score_ibi_train(fiducials: np.ndarray, times_ms: np.ndarray) -> float:
+    """Score one fiducial IBI train for polarity selection."""
+    fiducials = np.asarray(fiducials, dtype=np.int64)
+    if fiducials.size < 3:
         return -1.0
-    ibi = np.diff(np.asarray(times_ms, dtype=np.float64)[peaks])
+    ibi = np.diff(np.asarray(times_ms, dtype=np.float64)[fiducials])
     valid = (ibi >= hrv.IBI_MIN_MS) & (ibi <= hrv.IBI_MAX_MS)
     valid_ratio = float(np.mean(valid)) if ibi.size else 0.0
     nn = ibi[valid]
@@ -244,6 +245,11 @@ def _score_peak_train(peaks: np.ndarray, times_ms: np.ndarray) -> float:
     cv = float(np.std(nn, ddof=1) / mean_nn) if mean_nn > 0 and nn.size > 1 else 1.0
     regularity = float(np.clip(1.0 - cv / 0.40, 0.0, 1.0))
     return valid_ratio + hr_score + regularity
+
+
+def _score_peak_train(peaks: np.ndarray, times_ms: np.ndarray) -> float:
+    """Backward-compatible name for the historical peak-IBI polarity score."""
+    return _score_ibi_train(peaks, times_ms)
 
 
 def _choose_polarity_peaks(x: np.ndarray, times_ms: np.ndarray, fs: float, method: Method) -> tuple[np.ndarray, np.ndarray, str]:

@@ -35,7 +35,7 @@ from evaluate_rawslots_baseline_ablation import (  # noqa: E402
     _fast_ppg_sqi,
     _peak_to_foot_indices,
     _prepare_channel,
-    _score_peak_train,
+    _score_ibi_train,
 )
 from preprocess import bandpass_filter  # noqa: E402
 
@@ -159,7 +159,9 @@ def _call_detector(detector: str, signal: np.ndarray, fs: float) -> tuple[np.nda
     if detector == "msptd":
         return msptd._msptd_beat_detector(signal, fs)
     if detector == "qppgfast":
-        return qppgfast._qppgfast_beat_detector(signal, fs)
+        # qppgfast normalizes invalid sentinel values in place. Polarity
+        # candidates must therefore receive independent signal buffers.
+        return qppgfast._qppgfast_beat_detector(np.array(signal, dtype=np.float64, copy=True), fs)
     raise KeyError(detector)
 
 
@@ -245,6 +247,11 @@ def _choose_polarity_detector(
     polarity_mode: str,
 ) -> tuple[dict[str, np.ndarray], np.ndarray, str, float, int, float]:
     filt = _bandpass_or_original(signal, fs, common_band)
+    if polarity_mode in {"fixed_positive", "fixed_negative"}:
+        label = "positive" if polarity_mode == "fixed_positive" else "negative"
+        oriented = filt if label == "positive" else -filt
+        return _detect_oriented(detector, oriented, times_ms, fs), oriented, label, np.nan, 0, np.nan
+
     if polarity_mode == "waveform_morphology":
         score = _waveform_polarity_score(filt)
         if score >= 0.0:
@@ -261,11 +268,12 @@ def _choose_polarity_detector(
         oriented = filt if label == "positive" else -filt
         return _detect_oriented(detector, oriented, times_ms, fs), oriented, label, score, votes, consensus
 
+    score_fiducial = "foot" if polarity_mode == "foot_train" else "peak"
     candidates: list[tuple[float, dict[str, np.ndarray], np.ndarray, str]] = []
     for polarity, label in ((1, "positive"), (-1, "negative")):
         oriented = filt if polarity > 0 else -filt
         fiducials = _detect_oriented(detector, oriented, times_ms, fs)
-        score = _score_peak_train(fiducials["peak"], times_ms)
+        score = _score_ibi_train(fiducials[score_fiducial], times_ms)
         candidates.append((score, fiducials, oriented, label))
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates[0][1], candidates[0][2], candidates[0][3], candidates[0][0], 0, np.nan
@@ -370,6 +378,17 @@ def _parse_participants(value: str | None) -> tuple[str, ...] | None:
     return participants
 
 
+def _parse_devices(value: str | None) -> tuple[str, ...] | None:
+    if value is None or not value.strip():
+        return None
+    devices = tuple(x.strip() for x in value.split(",") if x.strip())
+    if not devices:
+        raise ValueError("devices must not be empty")
+    if len(set(devices)) != len(devices):
+        raise ValueError("devices must be unique")
+    return devices
+
+
 def _participant_from_path(path: Path) -> str:
     return path.stem.rsplit("_", 1)[-1].upper()
 
@@ -389,6 +408,7 @@ def _load_channel_metrics_for_path(
     max_gap_ms: float,
     correction_states: tuple[bool, ...],
     polarity_mode: str,
+    selected_devices: tuple[str, ...] | None = None,
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     with np.load(path, allow_pickle=True) as z:
@@ -415,6 +435,8 @@ def _load_channel_metrics_for_path(
         print(f"[detector-fiducial] {participant} eval_windows={len(window_indices)}")
         for wi in window_indices:
             for di, device in enumerate(devices):
+                if selected_devices is not None and device not in selected_devices:
+                    continue
                 motion = float(np.asarray(z["accel_motion_mean_mag"])[wi, di]) if "accel_motion_mean_mag" in z.files else np.nan
                 for ci, channel in enumerate(channels):
                     if input_mode == "strict_interp100":
@@ -502,6 +524,7 @@ def _load_channel_metrics_for_path(
                                     "polarity_decision_score": polarity_score,
                                     "polarity_consensus_votes": consensus_votes,
                                     "polarity_consensus_fraction": consensus_fraction,
+                                    "fiducial_ibi_score": _score_ibi_train(fid, times_ms),
                                     **_fiducial_metrics(fid, oriented, times_ms, method, sqi=sqi),
                                 })
     return pd.DataFrame(rows)
@@ -527,6 +550,7 @@ def _load_channel_metrics_parallel(
     correction_states: tuple[bool, ...],
     participants: tuple[str, ...] | None,
     polarity_mode: str,
+    selected_devices: tuple[str, ...] | None,
     jobs: int,
     chunks_per_participant: int,
 ) -> pd.DataFrame:
@@ -552,6 +576,7 @@ def _load_channel_metrics_parallel(
                 max_gap_ms=max_gap_ms,
                 correction_states=correction_states,
                 polarity_mode=polarity_mode,
+                selected_devices=selected_devices,
             )
             for path, chunk in tasks
         ]
@@ -568,6 +593,7 @@ def _load_channel_metrics_parallel(
                     max_gap_ms=max_gap_ms,
                     correction_states=correction_states,
                     polarity_mode=polarity_mode,
+                    selected_devices=selected_devices,
                 )
                 for path, chunk in tasks
             ]
@@ -817,9 +843,15 @@ def main() -> None:
     ap.add_argument("--max-gap-ms", type=float, default=100.0)
     ap.add_argument(
         "--polarity-mode",
-        choices=("peak_train", "waveform_morphology", "waveform_consensus_v1"),
+        choices=("peak_train", "foot_train", "fixed_positive", "fixed_negative", "waveform_morphology", "waveform_consensus_v1"),
         default="peak_train",
-        help="peak_train reproduces legacy detector-score choice; waveform modes choose polarity before detection, and consensus_v1 rejects unstable directions.",
+        help="peak_train/foot_train choose a common direction from that fiducial's IBI quality; fixed modes retain or negate all PPG; waveform modes choose polarity before detection, and consensus_v1 rejects unstable directions.",
+    )
+    ap.add_argument(
+        "--devices",
+        type=str,
+        default=None,
+        help="Optional comma-separated device names, for example Earring. Omit to evaluate all devices.",
     )
     ap.add_argument(
         "--bandpass-candidates",
@@ -845,6 +877,7 @@ def main() -> None:
     pipelines = _detector_pipelines(detectors, bands)
     correction_states = (False, True) if args.fair_screen else (True,)
     participants = _parse_participants(args.participants)
+    selected_devices = _parse_devices(args.devices)
     if args.all_windows:
         args.max_windows_per_participant = None
     if args.max_windows_per_participant is None and not args.allow_full:
@@ -867,6 +900,7 @@ def main() -> None:
             correction_states=correction_states,
             participants=participants,
             polarity_mode=args.polarity_mode,
+            selected_devices=selected_devices,
             jobs=args.jobs,
             chunks_per_participant=args.chunks_per_participant,
         )
@@ -897,6 +931,7 @@ def main() -> None:
                 "ibi_correction_states": list(correction_states),
                 "gates": [gate.__dict__ for gate in GATES],
                 "participants": list(participants) if participants is not None else None,
+                "devices": list(selected_devices) if selected_devices is not None else None,
                 "max_windows_per_participant": args.max_windows_per_participant,
             },
             indent=2,
