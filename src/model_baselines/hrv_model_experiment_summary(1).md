@@ -190,14 +190,6 @@ The heuristic baseline and model results must not be ranked by MAE alone when th
 
 Among the five supplied papers, Kazemi et al. (2022) is the only study that directly proposes an open-source machine-learning method for PPG peak detection. The other papers primarily validate wearable-derived HRV against ECG and therefore support our HRV extraction and evaluation design rather than our trainable models.
 
-| Source | Method used | Relevance to our pipeline |
-|---|---|---|
-| Kazemi et al. (2022) | Seven-layer dilated CNN, sigmoid peak probabilities, Adam, ordinary BCE, and threshold/local-maximum peak decoding | Direct basis for the dilated PeakNet concept |
-| Sarhaddi et al. (2022) | Five-minute windows, learned PPG peak detection, abnormal NN removal, and SDNN/RMSSD extraction | Basis for peak → cleaned IBI → HRV |
-| Flatt et al. (2025) | Controlled PPG–ECG validation with strict QC and Bland–Altman analysis | Supports QC, bias, and agreement analysis |
-| Sinichi et al. (2026) | Five-minute wearable–ECG comparison stratified by movement, sleep, and posture | Supports context-aware QC |
-| Tao et al. (2026) | Synchronized ring/chest-strap comparison with participant-level analysis | Supports synchronization and participant-level reporting |
-
 ### Open-source Kazemi implementation
 
 Code: https://github.com/HealthSciTech/Robust_PPG_PD
@@ -206,22 +198,64 @@ The official implementation uses 100-Hz, 15-second inputs and seven Conv1D layer
 
 The repository provides TensorFlow research code and data-processing examples but not a directly reusable PyTorch package or clearly packaged pretrained checkpoint. We should therefore reproduce the architecture in PyTorch rather than copy the script directly.
 
-### Which choices are ours?
+### Methodological Basis and Study-Specific Adaptations
 
-| Component | Basis |
-|---|---|
-| Dilated CNN and ordinary BCE baseline | Directly supported by Kazemi et al. |
-| Peak → cleaned IBI → SDNN/RMSSD | Supported by the supplied PRV literature |
-| Weighted BCE + Dice | Our adaptation for class imbalance |
-| Gaussian peak labels | Our implementation |
-| SciPy `find_peaks` and validation-selected threshold | Our event-decoding design |
-| Local-median IBI replacement | Our empirically selected correction |
-| Frozen PulsePPG/PaPaGei + Ridge | Our transfer-learning baseline |
-| Mean-pooled 5-minute embeddings | Our aggregation design |
-| Nested participant-grouped LOSO | Our leakage-control protocol |
-| Neural head and partial fine-tuning | Our ablation experiments |
+Our experiments distinguish between three levels of methodological support:
 
-Therefore, the current pipeline should be described as **literature-informed**, not as a strict reproduction.
+1. **Literature-derived implementations** reproduce the principal architecture
+   and training choices reported in a published method.
+2. **Literature-supported adaptations** apply established methods to our
+   five-minute PPG-to-HRV setting but require dataset-specific implementation
+   choices.
+3. **Study-specific ablations** are evaluated experimentally and are not
+   presented as published methods.
+
+| Component | Methodological basis | Status in this study |
+|---|---|---|
+| Kazemi-style dilated CNN, ELU activations, binary peak labels, and ordinary BCE | Kazemi et al. proposed a dilated 1D CNN for noise-robust PPG peak detection | Closest literature-derived reproduction |
+| U-Net/dilated peak segmentation | Supported by supervised PPG peak-detection work, including Kazemi et al. and TAU | Literature-supported model family |
+| Peak detection → IBI sequence → SDNN/RMSSD | Standard PPG-derived PRV workflow used throughout the HRV literature | Literature-supported physiological pipeline |
+| Physiological RR limits and local-median artifact detection | HRV preprocessing studies commonly detect abnormal intervals using physiological limits and deviation from a local median | Literature-supported adaptation; exact thresholds are dataset-specific |
+| Weighted BCE + Dice loss | Weighted cross-entropy and Dice-based objectives are established approaches for highly imbalanced segmentation targets | Literature-supported adaptation, not part of the Kazemi reproduction |
+| Gaussian peak labels | Soft or distance-based peak targets are motivated by temporal uncertainty in event localization, including distance-transform supervision in TAU | Study-specific implementation inspired by prior work |
+| `scipy.signal.find_peaks` decoding | Converts dense model probabilities into discrete pulse events using minimum-distance and threshold constraints | Study-specific implementation |
+| Validation-selected peak threshold | Prevents selection using the held-out test participant | Study-specific model-selection procedure |
+| Frozen PulsePPG/PaPaGei embeddings | Foundation-model and self-supervised PPG studies support transferring pretrained representations to downstream physiological tasks | Literature-supported transfer-learning baseline |
+| Ridge regression on frozen embeddings | A regularized linear probe tests whether HRV information is already encoded while limiting overfitting | Study-specific downstream estimator using a standard probing method |
+| Mean pooling of 10-second embeddings into one five-minute representation | Required because the pretrained encoder operates on shorter segments than the HRV analysis window | Study-specific aggregation design |
+| Regression-head training and partial fine-tuning | Standard alternatives to frozen linear probing for adapting pretrained encoders | Transfer-learning ablations |
+| Participant-level outer LOSO with participant-grouped inner validation | Prevents windows from the same participant appearing in both training and evaluation partitions | Leakage-control protocol |
+| Heuristic HRV + embedding-based residual correction | Motivated by knowledge-informed PPG models and morphology-aware HRV estimation | Proposed hybrid method; must be validated against heuristic-only and embedding-only baselines |
+
+### Interpretation
+
+The Kazemi-style experiment is the closest reproduction of a published peak
+detector within the constraints of our dataset. The original U-Net/dilated
+models, loss variants, threshold selection, and IBI-correction variants are
+literature-informed adaptations rather than strict reproductions.
+
+The PulsePPG and PaPaGei experiments use published pretrained encoders, while
+the five-minute aggregation, Ridge regression, participant-level nested LOSO,
+and partial-fine-tuning protocol are study-specific downstream evaluation
+choices.
+
+The proposed hybrid model is therefore described as a
+**literature-motivated method**:
+
+PPG waveform
+→ heuristic peak/IBI estimation
+→ initial SDNN/RMSSD and signal-quality features
+→ pretrained PPG embedding
+→ regularized residual correction
+→ final SDNN/RMSSD prediction.
+
+It is not assumed to be superior by construction. Its contribution must be
+established through leakage-safe comparison with:
+
+1. heuristic HRV alone;
+2. pretrained embedding alone;
+3. heuristic features plus embedding;
+4. heuristic features plus embedding-based residual correction.
 
 ### Recommended reproduction experiment
 
