@@ -1,4 +1,5 @@
 # Local data for standalone window / heuristic packages (do not commit)
+artifacts/
 src/heuristic_baselines/inputs/
 src/heuristic_baselines/outputs/
 src/ppg_windowed_data/
@@ -10,6 +11,7 @@ src/model_baselines/predictions/
 src/model_baselines/results/
 
 # IDE / editors
+.DS_Store
 .vscode/
 .ipynb_checkpoints/
 

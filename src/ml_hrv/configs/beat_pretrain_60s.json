@@ -1,0 +1,51 @@
+{
+  "data": {
+    "source_dir": "src/heuristic_baselines/outputs/synced_3device_rawaligned_training_v1_stride30_rawslots",
+    "cache_dir": "artifacts/ml_hrv/rawslot_cache",
+    "fs_hz": 100.0,
+    "window_seconds": 300,
+    "update_seconds": 30,
+    "segment_seconds": 10,
+    "devices": ["Earring", "Ring", "Watch"],
+    "accel_mode": "scalar",
+    "qc_only": true,
+    "cache_open_participants": 4
+  },
+  "model": {
+    "direct_architecture": "causal_tcn",
+    "use_timestamp_jitter": true,
+    "width": 24,
+    "token_dim": 96,
+    "tcn_layers": 4,
+    "dropout": 0.15,
+    "device_embedding_dim": 8,
+    "delay_min_ms": 100.0,
+    "delay_max_ms": 700.0,
+    "fusion_enabled": false
+  },
+  "train": {
+    "seed": 20260911,
+    "stage": "beat_pretrain",
+    "epochs": 20,
+    "patience": 5,
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "windows_per_batch": 4,
+    "batches_per_epoch": 256,
+    "num_workers": 0,
+    "persistent_workers": false,
+    "cpu_threads": 4,
+    "freeze_encoder_epochs": 0,
+    "consistency_weight": 0.0,
+    "beat_weight": 1.0,
+    "offset_weight": 0.2,
+    "sqi_weight": 0.1,
+    "grad_clip_norm": 5.0
+  },
+  "evaluation": {
+    "short_window_seconds": [30, 60, 120],
+    "coverage_bins": [0.9, 0.95, 0.98, 1.01],
+    "reject_confidence_below": 0.2,
+    "complementarity_min_gain_ms": 0.5
+  }
+}
