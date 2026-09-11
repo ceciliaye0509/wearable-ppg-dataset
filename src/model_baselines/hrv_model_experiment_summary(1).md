@@ -268,15 +268,143 @@ We will implement the official Kazemi seven-layer dilated CNN in PyTorch and com
 This experiment will determine whether the current bottleneck is caused primarily by the architecture, training objective, or peak decoder.
 
 
-## 8. Next experiments（按优先级）
+## Current Status and Next Steps
 
-1. **Highest priority:** rerun finalized Own PeakNet on Earring/Green with complete 16-fold LOSO, Dilated backbone, median IBI correction, Green input, and validation event-F1 checkpoint selection.
-2. **Highest priority:** regenerate exact PaPaGei pooled and participant-level metrics from its prediction CSVs.
-3. Align qppg, PeakNet, PaPaGei, and PulsePPG on the identical participant/window subset and report coverage alongside MAE, R², and r.
-4. **Recommended new experiment:** combine qppg HRV/quality features with frozen PulsePPG embeddings using nested Ridge, and test a residual-correction variant: `final HRV = qppg HRV + predicted error`.
-5. Widen the Frozen PulsePPG/PaPaGei Ridge alpha grid beyond `1000` and verify that selection no longer stops at the grid boundary.
-6. Treat PulsePPG head-only and partial fine-tuning as completed ablations; do not begin a large fine-tuning sweep unless a new hypothesis targets participant calibration or temporal aggregation.
-7. Investigate temporal or beat-aware aggregation for RMSSD, since global 5-minute embeddings and current regressors substantially shrink within-participant variability.
+### In progress
+
+1. **Kazemi-style PeakNet, complete 16-fold LOSO**
+
+   A literature-derived Kazemi-style dilated CNN is currently being evaluated
+   on Earring/Green using binary ±2-sample peak labels, ordinary BCE,
+   validation event-F1 checkpoint selection, and median IBI correction.
+
+   The evaluation will report peak-detection performance, peak-count error,
+   HRV coverage, raw-versus-corrected IBI results, and SDNN/RMSSD MAE, R²,
+   and Pearson r.
+
+2. **Finalized Own PeakNet evaluation**
+
+   The finalized study-specific PeakNet configuration should be evaluated
+   separately from the Kazemi reproduction:
+
+   - Earring/Green input
+   - Dilated backbone
+   - weighted BCE + Dice loss
+   - Gaussian peak labels
+   - validation event-F1 checkpoint selection
+   - validation-selected event threshold
+   - local-median IBI correction
+   - complete 16-fold participant LOSO
+
+   This experiment is required for a fair comparison between the original
+   study-specific PeakNet and the literature-derived Kazemi-style model.
+
+### Results requiring recalculation
+
+3. **Construct an identical evaluation subset**
+
+   Match qPPG, Own PeakNet, Kazemi PeakNet, PaPaGei, and PulsePPG predictions
+   by:
+
+   `participant + window_index + device + channel`
+
+   Report both:
+
+   - each method's native coverage; and
+   - performance on the common intersection of windows available to every
+     compared method.
+
+   This distinction is necessary because a method can obtain apparently
+   better error values by rejecting difficult windows.
+
+### Recommended next experiment
+
+4. **Physiology-informed embedding correction**
+
+   Combine qPPG-derived HRV and quality features with frozen PulsePPG
+   embeddings using leakage-safe nested Ridge.
+
+   Evaluate two variants:
+
+   **Feature-fusion model**
+
+   `predicted HRV = Ridge(qPPG features + PulsePPG embedding)`
+
+   **Residual-correction model**
+
+   `final HRV = qPPG HRV + Ridge(target HRV − qPPG HRV)`
+
+   Required comparisons:
+
+   - qPPG alone;
+   - frozen PulsePPG embedding alone;
+   - qPPG features + embedding;
+   - qPPG residual correction + embedding.
+
+   All variants must use the same outer participant LOSO folds, grouped inner
+   validation, and identical held-out windows.
+
+5. **Extend the Ridge regularization search**
+
+   The previous frozen-embedding experiments frequently selected
+   `alpha = 1000`, the largest candidate in the original grid. This indicates
+   that the optimum may lie outside the tested range.
+
+   Extend the grid to:
+
+   `[0.01, 0.1, 1, 10, 100, 1000, 10000, 100000]`
+
+   Confirm whether the selected alpha remains at the upper boundary. If it
+   does, inspect feature scaling and compare performance with a
+   mean-prediction baseline before extending the grid further.
+
+### Completed ablations
+
+6. **PulsePPG adaptation experiments — completed**
+
+   Frozen Ridge, head-only training, and partial fine-tuning have been
+   evaluated with complete 16-fold participant LOSO.
+
+   Partial fine-tuning did not consistently outperform the frozen encoder
+   across participants. Therefore, no large fine-tuning sweep is currently
+   planned unless a specific hypothesis addresses:
+
+   - participant-level calibration;
+   - temporal aggregation;
+   - device/domain shift; or
+   - insufficient RMSSD-sensitive representations.
+
+7. **Own PeakNet diagnostic ablations — completed**
+
+   The following components have already been investigated on the diagnostic
+   participant:
+
+   - U-Net versus dilated backbone;
+   - median replacement versus IBI removal;
+   - learning-rate sweep;
+   - positive-class-weight sweep;
+   - peak-threshold sweep;
+   - raw versus corrected IBI;
+   - visual best/worst-window spot checks.
+
+   These experiments identified over-detection, peak-count mismatch, and
+   sensitivity of downstream HRV to beat errors as the main limitations.
+
+### Longer-term methodological direction
+
+8. **Temporal or beat-aware aggregation for RMSSD**
+
+   Current global five-minute embeddings substantially compress prediction
+   variability, particularly for RMSSD. Future models should preserve
+   short-range beat-to-beat information through one of the following:
+
+   - sequence modeling over 10-second embeddings;
+   - attention-based segment aggregation;
+   - beat-level or IBI-level embeddings;
+   - prediction of local RMSSD contributions followed by aggregation.
+
+   This experiment should follow the harmonized baseline comparison and
+   hybrid Ridge experiment rather than precede them.
 
 ## 9. Cautions
 
