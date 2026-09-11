@@ -26,7 +26,6 @@ This document separates the following model pipelines:
 3. **PaPaGei frozen**: pretrained PaPaGei-S encoder → segment embeddings → 5-minute aggregation → nested participant-grouped Ridge → SDNN/RMSSD.
 4. **PulsePPG head-only / partial fine-tuning**: frozen or partially unfrozen PulsePPG encoder → neural regression head → SDNN/RMSSD.
 
-The heuristic qppgfast/SciPy results are maintained by the parallel heuristic pipeline and are not recomputed here.
 
 ## 2. Evaluation definitions（指标怎么读）
 
@@ -175,7 +174,7 @@ The heuristic baseline and model results must not be ranked by MAE alone when th
 6. Treat PulsePPG head-only and partial fine-tuning as completed ablations; do not begin a large fine-tuning sweep unless a new hypothesis targets participant calibration or temporal aggregation.
 7. Investigate temporal or beat-aware aggregation for RMSSD, since global 5-minute embeddings and current regressors substantially shrink within-participant variability.
 
-## 8. Reporting cautions
+## 8. Cautions
 
 - P1 smoke tests are diagnostic and cannot establish population-level superiority.
 - Thresholds, checkpoint epochs, channel choices, and IBI gates must be chosen without using the held-out test participant.
