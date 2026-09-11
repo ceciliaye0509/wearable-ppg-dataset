@@ -27,11 +27,16 @@ import os, re, glob
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 
-FIELD_PPG   = "ppg_resampled"
-FIELD_QC    = "ecg_label_qc_pass"
-LABEL_KEYS  = ["ecg_sdnn_ms", "ecg_rmssd_ms"]
+FIELD_PPG = "ppg_resampled_values"
+FIELD_QC = "ecg_label_qc_pass"
+FIELD_PPG_VALID_RATIO = "ppg_resampled_valid_sample_ratio"
+LABEL_KEYS = [
+    "ecg_sdnn_corrected_ms",
+    "ecg_rmssd_corrected_ms",
+]
 LOG_TARGET  = np.array([True, True])
 PPG_BASE    = ["ppg_sdnn_ms", "ppg_rmssd_ms"]
 RPEAK_KEY   = "ecg_r_peak_times_rel_ms"          # object array, one set of ms per window
@@ -59,8 +64,12 @@ def _npz_path(data_dir, pid):
 
 # -- load one participant (task decides the target form) ----------------------
 def _load_one(data_dir, pid, args):
-    key = (pid, args.task, args.device_name, int(args.use_deriv),
-           float(args.resample_hz), int(args.limit))
+    key = (pid, args.task, args.device_name,
+           getattr(args, "peak_channels", "both"), int(args.use_deriv),
+           float(args.resample_hz), int(args.limit),
+           os.environ.get("PEAK_MIN_PPG_VALID_RATIO", "0.95"),
+           os.environ.get("PEAK_BANDPASS_LOW_HZ", "0.5"),
+           os.environ.get("PEAK_BANDPASS_HIGH_HZ", "8.0"))
     if key in _CACHE:
         return _CACHE[key]
 
@@ -68,11 +77,30 @@ def _load_one(data_dir, pid, args):
     di = DEVICE_IDX[args.device_name]
 
     ppg = np.asarray(z[FIELD_PPG], dtype=np.float32)[:, di, :, :]      # (N,2,T)
+    if args.task == "peak":
+        channel_indices = {
+            "green": [0], "ir": [1], "both": [0, 1],
+        }[getattr(args, "peak_channels", "both")]
+        ppg = ppg[:, channel_indices, :]
     y   = np.stack([np.asarray(z[k], float) for k in LABEL_KEYS], 1)   # (N,K) scalar truth (ms)
 
     keep = np.isfinite(y).all(1) & (y > 0).all(1)
     if FIELD_QC in z.files:
         keep &= np.asarray(z[FIELD_QC]).astype(bool)
+
+    # Peak detection requires usable PPG as well as usable ECG labels.
+    # Require both GREEN and IR channels for the selected device because
+    # PeakNet consumes both channels.
+    if args.task == "peak" and FIELD_PPG_VALID_RATIO in z.files:
+        minimum_ppg_ratio = float(
+            os.environ.get("PEAK_MIN_PPG_VALID_RATIO", "0.95")
+        )
+        ppg_valid_ratio = np.asarray(
+            z[FIELD_PPG_VALID_RATIO],
+            dtype=np.float32,
+        )[:, di, channel_indices]
+        keep &= np.isfinite(ppg_valid_ratio).all(axis=1)
+        keep &= (ppg_valid_ratio >= minimum_ppg_ratio).all(axis=1)
 
     # PPG-derived baseline (N,3,2) -> select device, nanmean over 2 channels -> (N,K)
     base = None
@@ -86,6 +114,15 @@ def _load_one(data_dir, pid, args):
 
     rpeaks = z[RPEAK_KEY] if RPEAK_KEY in z.files else None            # object (N,)
 
+    if args.task == "peak":
+        if rpeaks is None:
+            raise KeyError(f"Missing required peak field: {RPEAK_KEY}")
+        valid_peak_labels = np.asarray([
+            _valid_rpeak_array(value)
+            for value in rpeaks
+        ])
+        keep &= valid_peak_labels
+
     idx = np.where(keep)[0]
     if args.limit and len(idx) > args.limit:
         idx = idx[:args.limit]
@@ -94,16 +131,56 @@ def _load_one(data_dir, pid, args):
     if base is not None:   base   = base[idx]
     if rpeaks is not None: rpeaks = rpeaks[idx]
 
-    # downsample
+    # PeakNet needs pulse morphology rather than slow baseline drift.
+    # Fill short unsupported regions, then band-pass before resampling.
+    if args.task == "peak":
+        ppg = _preprocess_peak_ppg(
+            ppg,
+            fs=float(args.src_hz),
+            low_hz=float(os.environ.get("PEAK_BANDPASS_LOW_HZ", "0.5")),
+            high_hz=float(os.environ.get("PEAK_BANDPASS_HIGH_HZ", "8.0")),
+        )
+
+    # Downsample. Peak detection uses polyphase resampling so frequencies above
+    # the new Nyquist limit are removed instead of aliased into the pulse band.
     tgt_fs = args.src_hz
     if args.resample_hz and args.resample_hz < args.src_hz:
-        step = int(round(args.src_hz / args.resample_hz))
-        ppg = ppg[:, :, ::step]
-        tgt_fs = args.src_hz / step
+        if args.task == "peak":
+            from fractions import Fraction
+            from scipy.signal import resample_poly
+
+            ratio = Fraction(
+                float(args.resample_hz) / float(args.src_hz)
+            ).limit_denominator(1000)
+            ppg = resample_poly(
+                ppg,
+                up=ratio.numerator,
+                down=ratio.denominator,
+                axis=-1,
+            ).astype(np.float32, copy=False)
+            tgt_fs = float(args.src_hz) * ratio.numerator / ratio.denominator
+        else:
+            step = int(round(args.src_hz / args.resample_hz))
+            ppg = ppg[:, :, ::step]
+            tgt_fs = args.src_hz / step
     T = ppg.shape[-1]
 
     # per-window per-channel z-norm
-    ppg = (ppg - ppg.mean(-1, keepdims=True)) / (ppg.std(-1, keepdims=True) + 1e-6)
+    # Normalize while ignoring unsupported NaN samples
+    ppg_mean = np.nanmean(ppg, axis=-1, keepdims=True)
+    ppg_std = np.nanstd(ppg, axis=-1, keepdims=True)
+
+    ppg = (ppg - ppg_mean) / (ppg_std + 1e-6)
+
+    # After normalization, missing samples are replaced by the window-channel mean
+    # because zero is the normalized mean.
+    ppg = np.nan_to_num(
+        ppg,
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    )
+
     if args.use_deriv:
         d = np.diff(ppg, axis=-1, prepend=ppg[:, :, :1])
         ppg = np.concatenate([ppg, d], axis=1)                        # (N,2C,T)
@@ -119,9 +196,75 @@ def _load_one(data_dir, pid, args):
     return out
 
 
+def _valid_rpeak_array(value):
+    """Return True for a nonempty, finite, strictly increasing peak sequence."""
+    if value is None:
+        return False
+    peaks = np.asarray(value, dtype=np.float64).reshape(-1)
+    return (
+        peaks.size >= 4 and
+        np.isfinite(peaks).all() and
+        np.all(np.diff(peaks) > 0)
+    )
+
+
+def _fill_missing_linear(signal):
+    """Linearly fill non-finite samples along the last axis."""
+    signal = np.asarray(signal, dtype=np.float32).copy()
+    flat = signal.reshape(-1, signal.shape[-1])
+    sample_index = np.arange(signal.shape[-1])
+
+    for row in flat:
+        finite = np.isfinite(row)
+        if finite.all():
+            continue
+        if finite.sum() < 2:
+            row[:] = 0.0
+            continue
+        row[~finite] = np.interp(
+            sample_index[~finite],
+            sample_index[finite],
+            row[finite],
+        )
+    return signal
+
+
+def _preprocess_peak_ppg(ppg, fs, low_hz=0.5, high_hz=8.0):
+    """Fill missing samples and apply a zero-phase Butterworth band-pass."""
+    from scipy.signal import butter, sosfiltfilt
+
+    if not 0.0 < low_hz < high_hz < fs / 2.0:
+        raise ValueError(
+            f"Invalid peak band-pass [{low_hz}, {high_hz}] Hz for fs={fs}"
+        )
+
+    filled = _fill_missing_linear(ppg)
+    sos = butter(
+        4,
+        [low_hz, high_hz],
+        btype="bandpass",
+        fs=fs,
+        output="sos",
+    )
+    return sosfiltfilt(sos, filled, axis=-1).astype(np.float32, copy=False)
+
+
 def _peak_targets(rpeaks, T, fs, sigma_ms=25.0):
     N = len(rpeaks)
     mask = np.zeros((N, T), np.float32)
+    target_mode = os.environ.get("PEAK_TARGET_MODE", "gaussian").strip().lower()
+    if target_mode == "kazemi":
+        # Official code labels the peak sample and two samples on each side.
+        for i, arr in enumerate(rpeaks):
+            if arr is None:
+                continue
+            for t_ms in np.asarray(arr, float):
+                center = int(round(t_ms / 1000.0 * fs))
+                start, stop = max(0, center - 2), min(T, center + 3)
+                mask[i, start:stop] = 1.0
+        return mask
+    if target_mode != "gaussian":
+        raise ValueError(f"Unknown PEAK_TARGET_MODE: {target_mode!r}")
     sig = max(1.0, sigma_ms / 1000.0 * fs)
     half = int(3 * sig)
     bump = np.exp(-0.5 * (np.arange(-half, half + 1) / sig) ** 2).astype(np.float32)
@@ -138,7 +281,12 @@ def _peak_targets(rpeaks, T, fs, sigma_ms=25.0):
 
 
 def n_input_channels(args):
-    return 2 * (2 if args.use_deriv else 1)   # green+ir, (x2 if derivative added)
+    channel_mode = (
+        getattr(args, "peak_channels", "both")
+        if args.task == "peak" else "both"
+    )
+    base_channels = 2 if channel_mode == "both" else 1
+    return base_channels * (2 if args.use_deriv else 1)
 
 
 # -- setup_dataloaders: same signature as yours (train_loaders, val, test) ----
@@ -285,8 +433,153 @@ class PeakNet(nn.Module):
         return self.head(x), None
 
 
+class DilatedResidualBlock(nn.Module):
+    """Residual 1-D block that expands temporal context without pooling."""
+
+    def __init__(self, channels, dilation):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv1d(
+                channels,
+                channels,
+                kernel_size=3,
+                padding=dilation,
+                dilation=dilation,
+                bias=False,
+            ),
+            nn.BatchNorm1d(channels),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(
+                channels,
+                channels,
+                kernel_size=3,
+                padding=dilation,
+                dilation=dilation,
+                bias=False,
+            ),
+            nn.BatchNorm1d(channels),
+        )
+        self.activation = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        return self.activation(x + self.net(x))
+
+
+class DilatedPeakNet(nn.Module):
+    """Literature-inspired dilated CNN for per-sample PPG peak logits.
+
+    This is an independent implementation, not an exact reproduction of the
+    Kazemi et al. model. It preserves temporal resolution and uses dilations to
+    observe multiple neighboring beats.
+    """
+
+    def __init__(self, cin, width=48, dilations=(1, 2, 4, 8, 16, 32)):
+        super().__init__()
+        self.stem = nn.Sequential(
+            nn.Conv1d(cin, width, kernel_size=7, padding=3, bias=False),
+            nn.BatchNorm1d(width),
+            nn.ReLU(inplace=True),
+        )
+        self.blocks = nn.Sequential(*[
+            DilatedResidualBlock(width, dilation)
+            for dilation in dilations
+        ])
+        self.head = nn.Conv1d(width, 1, kernel_size=1)
+
+    def forward(self, x):
+        x = self.stem(x)
+        x = self.blocks(x)
+        return self.head(x), None
+
+
+class KazemiPeakNet(nn.Module):
+    """PyTorch reproduction of the seven-layer Kazemi et al. dilated CNN.
+
+    The published TensorFlow model uses kernel size 3, ELU activations,
+    filters 4/8/8/16/16/32/1, and dilations 1/2/4/8/16/32/64.
+    This module returns logits; sigmoid is applied by the loss/evaluation code.
+    """
+
+    def __init__(self, cin):
+        super().__init__()
+        filters = (4, 8, 8, 16, 16, 32)
+        dilations = (1, 2, 4, 8, 16, 32)
+        layers = []
+        input_channels = cin
+        for output_channels, dilation in zip(filters, dilations):
+            layers.extend([
+                nn.Conv1d(
+                    input_channels,
+                    output_channels,
+                    kernel_size=3,
+                    dilation=dilation,
+                    padding=dilation,
+                ),
+                nn.ELU(inplace=True),
+            ])
+            input_channels = output_channels
+        self.features = nn.Sequential(*layers)
+        self.head = nn.Conv1d(
+            input_channels,
+            1,
+            kernel_size=3,
+            dilation=64,
+            padding=64,
+        )
+
+    def forward(self, x):
+        return self.head(self.features(x)), None
+
+
+class PeakLoss(nn.Module):
+    """
+    Weighted BCE + soft Dice loss.
+
+    Weighted BCE reduces the effect of the large number of non-peak samples.
+    Dice loss encourages overlap between predicted and true peak regions.
+    """
+    def __init__(self, pos_weight=10.0, dice_weight=1.0):
+        super().__init__()
+        self.pos_weight = float(pos_weight)
+        self.dice_weight = float(dice_weight)
+
+    def forward(self, logits, target):
+        pos_weight = torch.tensor(
+            self.pos_weight,
+            device=logits.device,
+            dtype=logits.dtype,
+        )
+
+        bce = F.binary_cross_entropy_with_logits(
+            logits,
+            target,
+            pos_weight=pos_weight,
+        )
+
+        prob = torch.sigmoid(logits)
+
+        intersection = (prob * target).sum(dim=1)
+        denominator = prob.sum(dim=1) + target.sum(dim=1)
+
+        dice = (
+            (2.0 * intersection + 1e-6) /
+            (denominator + 1e-6)
+        ).mean()
+
+        return bce + self.dice_weight * (1.0 - dice)
+
+
 def make_criterion(args):
-    return nn.BCEWithLogitsLoss() if args.task == "peak" else nn.MSELoss()
+    if args.task == "peak":
+        return PeakLoss(
+            pos_weight=float(
+                os.environ.get("PEAK_POS_WEIGHT", "10.0")
+            ),
+            dice_weight=float(
+                os.environ.get("PEAK_DICE_WEIGHT", "1.0")
+            ),
+        )
+    return nn.MSELoss()
 
 
 # -- task-specific test (use instead of your test()) --------------------------
@@ -307,36 +600,872 @@ def test_hrv(test_loader, model, device, args, participant_id=None):
     return res, bres
 
 
-def test_peak(test_loader, model, device, args, participant_id=None):
-    model.eval(); yhrv_pred = []
+def test_peak(
+    test_loader,
+    model,
+    device,
+    args,
+    participant_id=None,
+):
+    model.eval()
+
     fs = args._tgt_fs
+    threshold = getattr(args, "_peak_threshold", 0.30)
+
+    predicted_hrv = []
+    predicted_hrv_raw = []
+
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
+
+    total_windows = 0
+    valid_hrv_windows = 0
+
+    predicted_peak_counts = []
+    true_peak_counts = []
+    correction_ratios = []
+
+    # Optional visual audit. Disabled unless PEAK_AUDIT_DIR is set.
+    # When enabled, only the requested held-out participant is exported.
+    audit_dir = os.environ.get("PEAK_AUDIT_DIR", "").strip()
+    audit_participant = os.environ.get(
+        "PEAK_AUDIT_PARTICIPANT",
+        "P1",
+    ).strip()
+    current_participant = str(
+        participant_id or getattr(args, "target_domain", "unknown")
+    )
+    collect_audit = bool(audit_dir) and current_participant == audit_participant
+    audit_rows = []
+    test_row_index = 0
+
     with torch.no_grad():
-        for x, _, _ in test_loader:
-            logit, _ = model(x.to(device))
-            prob = torch.sigmoid(logit).squeeze(1).cpu().numpy()      # (B,T)
-            for p in prob:
-                yhrv_pred.append(_hrv_from_prob(p, fs))
-    yt = args._test_y_ms                                              # (N,K) ms
-    yp = np.array(yhrv_pred)                                          # (N,K) ms
-    m = np.isfinite(yp).all(1)
-    return _regress_metrics(yt[m], yp[m]), None
+        for x, target_peak, _ in test_loader:
+            logits, _ = model(x.to(device))
 
+            probabilities = (
+                torch.sigmoid(logits)
+                .squeeze(1)
+                .cpu()
+                .numpy()
+            )
 
-def _hrv_from_prob(prob, fs, thr=0.3, min_rr_ms=300):
-    # peak picking via scipy: height threshold + min distance (in samples)
+            target_peak = target_peak.numpy()
+
+            for prob, target in zip(probabilities, target_peak):
+                total_windows += 1
+
+                predicted_peaks = _find_peak_indices(
+                    prob,
+                    fs,
+                    threshold,
+                )
+
+                true_peaks = _find_peak_indices(
+                    target,
+                    fs,
+                    threshold=0.50,
+                )
+
+                tp, fp, fn = _match_peak_counts(
+                    predicted_peaks,
+                    true_peaks,
+                    fs,
+                    tolerance_ms=100.0,
+                )
+
+                total_tp += tp
+                total_fp += fp
+                total_fn += fn
+
+                true_peak_counts.append(len(true_peaks))
+
+                (
+                    raw_hrv,
+                    hrv,
+                    predicted_count,
+                    correction_ratio,
+                ) = _hrv_from_prob(
+                    prob,
+                    fs,
+                    thr=threshold,
+                    ibi_method=args.ibi_method,
+                    min_rr_ms=args.min_rr_ms,
+                    max_rr_ms=args.max_rr_ms,
+                    deviation_threshold=args.ibi_deviation_threshold,
+                    reject_ratio=args.ibi_reject_ratio,
+                )
+
+                predicted_peak_counts.append(predicted_count)
+                correction_ratios.append(correction_ratio)
+                predicted_hrv_raw.append(raw_hrv)
+                predicted_hrv.append(hrv)
+
+                if collect_audit:
+                    window_tp, window_fp, window_fn = _match_peak_counts(
+                        predicted_peaks,
+                        true_peaks,
+                        fs,
+                        tolerance_ms=100.0,
+                    )
+                    window_precision = window_tp / max(
+                        window_tp + window_fp,
+                        1,
+                    )
+                    window_recall = window_tp / max(
+                        window_tp + window_fn,
+                        1,
+                    )
+                    window_f1 = (
+                        2.0 * window_precision * window_recall /
+                        max(window_precision + window_recall, 1e-12)
+                    )
+                    matched_offsets_ms = _matched_peak_offsets_ms(
+                        predicted_peaks,
+                        true_peaks,
+                        fs,
+                        tolerance_ms=100.0,
+                    )
+                    audit_rows.append({
+                        "test_row_index": int(test_row_index),
+                        "peak_f1": float(window_f1),
+                        "precision": float(window_precision),
+                        "recall": float(window_recall),
+                        "tp": int(window_tp),
+                        "fp": int(window_fp),
+                        "fn": int(window_fn),
+                        "true_peak_count": int(len(true_peaks)),
+                        "predicted_peak_count": int(len(predicted_peaks)),
+                        "median_matched_offset_ms": (
+                            float(np.median(matched_offsets_ms))
+                            if len(matched_offsets_ms)
+                            else np.nan
+                        ),
+                        "mean_matched_abs_offset_ms": (
+                            float(np.mean(np.abs(matched_offsets_ms)))
+                            if len(matched_offsets_ms)
+                            else np.nan
+                        ),
+                        "correction_ratio": float(correction_ratio),
+                        "raw_sdnn_ms": float(raw_hrv[0]),
+                        "raw_rmssd_ms": float(raw_hrv[1]),
+                        "corrected_sdnn_ms": float(hrv[0]),
+                        "corrected_rmssd_ms": float(hrv[1]),
+                    })
+
+                test_row_index += 1
+
+                if np.isfinite(hrv).all():
+                    valid_hrv_windows += 1
+
+    precision = total_tp / max(total_tp + total_fp, 1)
+    recall = total_tp / max(total_tp + total_fn, 1)
+
+    f1 = (
+        2.0 * precision * recall /
+        max(precision + recall, 1e-12)
+    )
+
+    coverage = valid_hrv_windows / max(total_windows, 1)
+
+    correction_ratios = np.asarray(correction_ratios, dtype=float)
+
+    if collect_audit and audit_rows:
+        _export_peak_spotcheck(
+            test_loader=test_loader,
+            model=model,
+            device=device,
+            args=args,
+            participant_id=current_participant,
+            threshold=threshold,
+            audit_rows=audit_rows,
+            output_root=audit_dir,
+        )
+
+    print(
+        f"    Peak detection: "
+        f"threshold={threshold:.2f} | "
+        f"precision={precision:.3f} | "
+        f"recall={recall:.3f} | "
+        f"F1={f1:.3f}"
+    )
+
+    print(
+        f"    Peak counts: "
+        f"true mean={np.mean(true_peak_counts):.1f} | "
+        f"predicted mean={np.mean(predicted_peak_counts):.1f}"
+    )
+
+    print(
+        f"    HRV coverage: "
+        f"{valid_hrv_windows}/{total_windows} "
+        f"({100.0 * coverage:.1f}%)"
+    )
+
+    if np.isfinite(correction_ratios).any():
+        print(
+            f"    Mean RR correction ratio: "
+            f"{np.nanmean(correction_ratios):.3f}"
+        )
+
+    true_hrv = args._test_y_ms
+    predicted_hrv_raw = np.asarray(predicted_hrv_raw)
+    predicted_hrv = np.asarray(predicted_hrv)
+
+    paired_valid = (
+        np.isfinite(predicted_hrv_raw).all(axis=1) &
+        np.isfinite(predicted_hrv).all(axis=1) &
+        np.isfinite(true_hrv).all(axis=1)
+    )
+
+    if paired_valid.sum() >= 2:
+        raw_metrics = _regress_metrics(
+            true_hrv[paired_valid],
+            predicted_hrv_raw[paired_valid],
+        )
+        corrected_metrics = _regress_metrics(
+            true_hrv[paired_valid],
+            predicted_hrv[paired_valid],
+        )
+
+        print(
+            "    IBI correction ablation "
+            f"(paired windows={paired_valid.sum()}):"
+        )
+
+        for key, short_name in zip(
+            LABEL_KEYS,
+            ["SDNN", "RMSSD"],
+        ):
+            raw_result = raw_metrics[key]
+            corrected_result = corrected_metrics[key]
+
+            improvement = (
+                raw_result["mae"] -
+                corrected_result["mae"]
+            )
+
+            print(
+                f"      {short_name}: "
+                f"raw MAE={raw_result['mae']:.3f} ms | "
+                f"corrected MAE={corrected_result['mae']:.3f} ms | "
+                f"improvement={improvement:+.3f} ms | "
+                f"raw r={raw_result['r']:.3f} | "
+                f"corrected r={corrected_result['r']:.3f}"
+            )
+
+    valid = (
+        np.isfinite(predicted_hrv).all(axis=1) &
+        np.isfinite(true_hrv).all(axis=1)
+    )
+
+    if valid.sum() < 2:
+        empty_result = {
+            key: {
+                "r2": np.nan,
+                "r": np.nan,
+                "me": np.nan,
+                "sde": np.nan,
+                "mae": np.nan,
+                "n": int(valid.sum()),
+            }
+            for key in LABEL_KEYS
+        }
+
+        return empty_result, None
+
+    return (
+        _regress_metrics(
+            true_hrv[valid],
+            predicted_hrv[valid],
+        ),
+        None,
+    )
+
+def _find_peak_indices(prob, fs, threshold):
+    """
+    Convert one probability sequence into predicted peak indices.
+    A minimum distance of 300 ms corresponds to a maximum HR of 200 bpm.
+    """
     from scipy.signal import find_peaks
-    dist = max(1, int(min_rr_ms / 1000 * fs))
-    idx, _ = find_peaks(prob, height=thr, distance=dist)
-    if len(idx) < 4:
+
+    min_distance = max(1, int(round(float(os.environ.get("PEAK_MIN_DISTANCE_MS", "300")) / 1000.0 * fs)))
+
+    peaks, _ = find_peaks(
+        prob,
+        height=threshold,
+        distance=min_distance,
+        prominence=float(os.environ.get("PEAK_PROMINENCE", "0.0")),
+    )
+
+    return peaks.astype(np.int64)
+
+
+def _match_peak_counts(predicted, truth, fs, tolerance_ms=100.0):
+    """
+    Greedily match predicted peaks to ECG peaks within a time tolerance.
+    Returns TP, FP, FN.
+    """
+    predicted = np.asarray(predicted, dtype=np.int64)
+    truth = np.asarray(truth, dtype=np.int64)
+
+    tolerance = max(
+        1,
+        int(round(tolerance_ms / 1000.0 * fs)),
+    )
+
+    used = np.zeros(len(truth), dtype=bool)
+    tp = 0
+
+    for peak in predicted:
+        candidates = np.where(
+            (~used) & (np.abs(truth - peak) <= tolerance)
+        )[0]
+
+        if len(candidates) == 0:
+            continue
+
+        nearest = candidates[
+            np.argmin(np.abs(truth[candidates] - peak))
+        ]
+
+        used[nearest] = True
+        tp += 1
+
+    fp = len(predicted) - tp
+    fn = len(truth) - tp
+
+    return tp, fp, fn
+
+
+def _matched_peak_offsets_ms(
+    predicted,
+    truth,
+    fs,
+    tolerance_ms=100.0,
+):
+    """Return one-to-one matched offsets: predicted time minus ECG time."""
+    predicted = np.asarray(predicted, dtype=np.int64)
+    truth = np.asarray(truth, dtype=np.int64)
+    tolerance = max(1, int(round(tolerance_ms / 1000.0 * fs)))
+    used = np.zeros(len(truth), dtype=bool)
+    offsets = []
+
+    for peak in predicted:
+        candidates = np.where(
+            (~used) & (np.abs(truth - peak) <= tolerance)
+        )[0]
+        if len(candidates) == 0:
+            continue
+        nearest = candidates[
+            np.argmin(np.abs(truth[candidates] - peak))
+        ]
+        used[nearest] = True
+        offsets.append((peak - truth[nearest]) / fs * 1000.0)
+
+    return np.asarray(offsets, dtype=np.float64)
+
+
+def _select_peak_spotcheck_rows(audit_rows, count=6):
+    """Select two worst, two median, and two best windows by peak F1."""
+    ordered = sorted(
+        audit_rows,
+        key=lambda row: (row["peak_f1"], row["test_row_index"]),
+    )
+    n = len(ordered)
+    if n <= count:
+        return [("all", row) for row in ordered]
+
+    candidates = [
+        ("worst", ordered[0]),
+        ("worst", ordered[1]),
+        ("middle", ordered[max(0, n // 2 - 1)]),
+        ("middle", ordered[min(n - 1, n // 2)]),
+        ("best", ordered[-2]),
+        ("best", ordered[-1]),
+    ]
+
+    selected = []
+    used = set()
+    for category, row in candidates:
+        index = row["test_row_index"]
+        if index not in used:
+            selected.append((category, row))
+            used.add(index)
+    return selected
+
+
+def _export_peak_spotcheck(
+    test_loader,
+    model,
+    device,
+    args,
+    participant_id,
+    threshold,
+    audit_rows,
+    output_root,
+):
+    """Export six representative peak windows without changing evaluation."""
+    import csv
+    from pathlib import Path
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fs = float(args._tgt_fs)
+    device_name = str(getattr(args, "device_name", "unknown"))
+    output_dir = Path(output_root) / device_name / str(participant_id)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    selected = _select_peak_spotcheck_rows(audit_rows, count=6)
+    selected_by_index = {
+        row["test_row_index"]: (category, row)
+        for category, row in selected
+    }
+
+    true_hrv = np.asarray(args._test_y_ms)
+    exported_rows = []
+    global_index = 0
+    model.eval()
+
+    with torch.no_grad():
+        for x, target_peak, _ in test_loader:
+            batch_indices = range(global_index, global_index + len(x))
+            wanted_positions = [
+                position
+                for position, row_index in enumerate(batch_indices)
+                if row_index in selected_by_index
+            ]
+
+            if wanted_positions:
+                logits, _ = model(x.to(device))
+                probability = torch.sigmoid(logits).squeeze(1).cpu().numpy()
+                x_numpy = x.cpu().numpy()
+                target_numpy = target_peak.cpu().numpy()
+
+                for position in wanted_positions:
+                    row_index = global_index + position
+                    category, summary = selected_by_index[row_index]
+                    prob = probability[position]
+                    target = target_numpy[position]
+                    signal = x_numpy[position]
+
+                    predicted_peaks = _find_peak_indices(
+                        prob,
+                        fs,
+                        threshold,
+                    )
+                    true_peaks = _find_peak_indices(
+                        target,
+                        fs,
+                        threshold=0.50,
+                    )
+
+                    reference_mask = np.zeros(len(prob), dtype=np.int8)
+                    prediction_mask = np.zeros(len(prob), dtype=np.int8)
+                    reference_mask[true_peaks] = 1
+                    prediction_mask[predicted_peaks] = 1
+
+                    stem = f"{category}_row_{row_index:04d}"
+                    csv_path = output_dir / f"{stem}.csv"
+                    time_s = np.arange(len(prob), dtype=float) / fs
+                    green = signal[0]
+                    ir = signal[1] if signal.shape[0] > 1 else np.full_like(green, np.nan)
+
+                    with csv_path.open("w", newline="") as handle:
+                        writer = csv.writer(handle)
+                        writer.writerow([
+                            "time_s",
+                            "ppg_green_normalized",
+                            "ppg_ir_normalized",
+                            "reference_target",
+                            "predicted_probability",
+                            "is_reference_peak",
+                            "is_predicted_peak",
+                        ])
+                        writer.writerows(zip(
+                            time_s,
+                            green,
+                            ir,
+                            target,
+                            prob,
+                            reference_mask,
+                            prediction_mask,
+                        ))
+
+                    display_n = min(len(prob), int(round(30.0 * fs)))
+                    display_t = time_s[:display_n]
+                    display_predicted = predicted_peaks[predicted_peaks < display_n]
+                    display_true = true_peaks[true_peaks < display_n]
+
+                    figure, axes = plt.subplots(
+                        3,
+                        1,
+                        figsize=(16, 9),
+                        sharex=True,
+                    )
+                    channels = [
+                        (green, "Green PPG (normalized)", "tab:green"),
+                        (ir, "IR PPG (normalized)", "tab:purple"),
+                    ]
+                    for axis, (wave, label, color) in zip(axes[:2], channels):
+                        axis.plot(display_t, wave[:display_n], color=color, linewidth=0.8)
+                        for peak in display_true:
+                            axis.axvline(peak / fs, color="tab:blue", alpha=0.35, linewidth=0.8)
+                        for peak in display_predicted:
+                            axis.axvline(peak / fs, color="tab:red", alpha=0.35, linewidth=0.8)
+                        axis.set_ylabel(label)
+                        axis.grid(alpha=0.15)
+
+                    axes[2].plot(display_t, prob[:display_n], color="black", linewidth=0.9)
+                    axes[2].axhline(
+                        threshold,
+                        color="tab:red",
+                        linestyle="--",
+                        label=f"threshold={threshold:.2f}",
+                    )
+                    axes[2].scatter(
+                        display_true / fs,
+                        target[display_true],
+                        color="tab:blue",
+                        s=24,
+                        label="ECG reference event",
+                        zorder=3,
+                    )
+                    axes[2].scatter(
+                        display_predicted / fs,
+                        prob[display_predicted],
+                        color="tab:red",
+                        marker="x",
+                        s=32,
+                        label="predicted event",
+                        zorder=3,
+                    )
+                    axes[2].set_ylabel("Peak probability")
+                    axes[2].set_xlabel("Time (seconds)")
+                    axes[2].set_ylim(-0.03, 1.03)
+                    axes[2].legend(loc="upper right")
+                    axes[2].grid(alpha=0.15)
+
+                    figure.suptitle(
+                        f"{device_name}/{participant_id} row={row_index} "
+                        f"({category}) | F1={summary['peak_f1']:.3f} | "
+                        f"true={summary['true_peak_count']} pred={summary['predicted_peak_count']} | "
+                        f"median offset={summary['median_matched_offset_ms']:.1f} ms"
+                    )
+                    figure.tight_layout()
+                    figure.savefig(output_dir / f"{stem}.png", dpi=160)
+                    plt.close(figure)
+
+                    result = dict(summary)
+                    result.update({
+                        "category": category,
+                        "participant": participant_id,
+                        "device": device_name,
+                        "threshold": float(threshold),
+                        "true_sdnn_ms": float(true_hrv[row_index, 0]),
+                        "true_rmssd_ms": float(true_hrv[row_index, 1]),
+                        "plot_path": str(output_dir / f"{stem}.png"),
+                        "sample_csv_path": str(csv_path),
+                    })
+                    exported_rows.append(result)
+
+            global_index += len(x)
+
+    summary_path = output_dir / "spotcheck_summary.csv"
+    if exported_rows:
+        fieldnames = list(exported_rows[0].keys())
+        with summary_path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(exported_rows)
+
+    print(
+        f"    Peak spot-check: exported {len(exported_rows)} windows "
+        f"to {output_dir}"
+    )
+
+def select_peak_threshold(
+    val_loader,
+    model,
+    device,
+    args,
+    thresholds=None,
+    return_score=False,
+    quiet=False,
+):
+    """
+    Select the peak probability threshold using validation-set peak F1.
+    The test participant is not used for threshold selection.
+    """
+    if thresholds is None:
+        thresholds = np.arange(0.10, 0.81, 0.05)
+        fixed_threshold = os.environ.get("PEAK_FIXED_THRESHOLD", "").strip()
+        if fixed_threshold:
+            thresholds = [float(fixed_threshold)]
+
+    model.eval()
+    fs = args._tgt_fs
+
+    probabilities = []
+    targets = []
+
+    with torch.no_grad():
+        for x, y, _ in val_loader:
+            logits, _ = model(x.to(device))
+
+            prob = torch.sigmoid(logits).squeeze(1).cpu().numpy()
+
+            probabilities.extend(prob)
+            targets.extend(y.numpy())
+
+    best_threshold = 0.30
+    best_f1 = -1.0
+
+    for threshold in thresholds:
+        total_tp = 0
+        total_fp = 0
+        total_fn = 0
+
+        for prob, target in zip(probabilities, targets):
+            predicted_peaks = _find_peak_indices(
+                prob,
+                fs,
+                threshold,
+            )
+
+            true_peaks = _find_peak_indices(
+                target,
+                fs,
+                threshold=0.50,
+            )
+
+            tp, fp, fn = _match_peak_counts(
+                predicted_peaks,
+                true_peaks,
+                fs,
+                tolerance_ms=100.0,
+            )
+
+            total_tp += tp
+            total_fp += fp
+            total_fn += fn
+
+        precision = total_tp / max(total_tp + total_fp, 1)
+        recall = total_tp / max(total_tp + total_fn, 1)
+
+        f1 = (
+            2.0 * precision * recall /
+            max(precision + recall, 1e-12)
+        )
+
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = float(threshold)
+
+    if not quiet:
+        print(
+            f"    Selected peak threshold: {best_threshold:.2f} "
+            f"| validation F1: {best_f1:.3f}"
+        )
+
+    if return_score:
+        return best_threshold, best_f1
+    return best_threshold
+
+def _correct_rr_intervals(
+    rr,
+    threshold=0.20,
+    min_rr_ms=300.0,
+    max_rr_ms=2000.0,
+):
+    """
+    Apply the same median-filter correction used for the corrected ECG labels.
+    """
+    from scipy.ndimage import median_filter
+
+    rr = np.asarray(rr, dtype=np.float64)
+
+    if rr.size < 5:
+        return rr.copy(), 0.0
+
+    local_median = median_filter(
+        rr,
+        size=11,
+        mode="reflect",
+    )
+
+    physiological_artifact = (
+        (rr < min_rr_ms) |
+        (rr > max_rr_ms) |
+        ~np.isfinite(rr)
+    )
+    local_artifact = (
+        np.abs(rr - local_median) >
+        threshold * local_median
+    )
+    artifact = physiological_artifact | local_artifact
+
+    corrected = rr.copy()
+    corrected[artifact] = local_median[artifact]
+
+    return corrected, float(np.mean(artifact))
+
+
+def _remove_abnormal_rr_intervals(
+    rr,
+    threshold=0.20,
+    min_rr_ms=300.0,
+    max_rr_ms=3000.0,
+    reject_ratio=0.50,
+):
+    """Remove abnormal IBIs and reject windows with excessive removal.
+
+    This implements the rule described by Sarhaddi et al.: retain intervals in
+    the physiological range and within a specified fraction of the window's
+    mean normal interval; reject the window when too many intervals are lost.
+    """
+    rr = np.asarray(rr, dtype=np.float64)
+    physiological = (
+        np.isfinite(rr) &
+        (rr >= min_rr_ms) &
+        (rr <= max_rr_ms)
+    )
+
+    initial = rr[physiological]
+    if initial.size < 3:
+        return None, 1.0, None
+
+    mean_rr = float(np.mean(initial))
+    normal = physiological & (
+        np.abs(rr - mean_rr) <= threshold * mean_rr
+    )
+    removal_ratio = float(1.0 - np.mean(normal))
+
+    cleaned = rr[normal]
+    if removal_ratio > reject_ratio or cleaned.size < 3:
+        return None, removal_ratio, None
+
+    return cleaned, removal_ratio, normal
+
+
+def _hrv_from_rr(rr, original_valid_mask=None):
+    """Return HRV without joining intervals separated by a removed IBI."""
+    rr = np.asarray(rr, dtype=np.float64)
+    if rr.size < 3 or not np.isfinite(rr).all():
         return np.array([np.nan, np.nan])
-    t = idx / fs * 1000.0
-    rr = np.diff(t)
-    rr = rr[(rr > 300) & (rr < 2000)]
-    if len(rr) < 3:
-        return np.array([np.nan, np.nan])
-    sdnn = rr.std(ddof=1)
-    rmssd = np.sqrt(np.mean(np.diff(rr) ** 2))
-    return np.array([sdnn, rmssd])
+    if original_valid_mask is None:
+        differences = np.diff(rr)
+    else:
+        original_valid_mask = np.asarray(original_valid_mask, dtype=bool)
+        # Reconstruct the original sequence through the caller-provided mask.
+        # The cleaned values retain their original order; only consecutive
+        # retained intervals contribute to RMSSD.
+        original_positions = np.flatnonzero(original_valid_mask)
+        consecutive = np.diff(original_positions) == 1
+        differences = np.diff(rr)[consecutive]
+    if differences.size < 1:
+        return np.array([np.std(rr, ddof=1), np.nan])
+    return np.array([
+        np.std(rr, ddof=1),
+        np.sqrt(np.mean(differences ** 2)),
+    ])
+
+
+def _hrv_from_prob(
+    prob,
+    fs,
+    thr=0.30,
+    min_rr_ms=300.0,
+    max_rr_ms=2000.0,
+    ibi_method='median',
+    deviation_threshold=0.20,
+    reject_ratio=0.50,
+):
+    predicted_peaks = _find_peak_indices(
+        prob,
+        fs,
+        threshold=thr,
+    )
+
+    if len(predicted_peaks) < 4:
+        missing = np.array([np.nan, np.nan])
+        return missing.copy(), missing.copy(), len(predicted_peaks), np.nan
+
+    peak_times_ms = predicted_peaks / fs * 1000.0
+    rr = np.diff(peak_times_ms)
+
+    valid = (
+        (rr >= min_rr_ms) &
+        (rr <= max_rr_ms)
+    )
+
+    valid_rr = rr[valid]
+
+    if len(valid_rr) < 3:
+        missing = np.array([np.nan, np.nan])
+        return missing.copy(), missing.copy(), len(predicted_peaks), np.nan
+
+    raw_sdnn = np.std(valid_rr, ddof=1)
+
+    # RMSSD is defined only over originally adjacent valid intervals. Do not
+    # concatenate across an interval removed by physiological range filtering.
+    valid_pairs = valid[:-1] & valid[1:]
+    if valid_pairs.sum() < 1:
+        missing = np.array([np.nan, np.nan])
+        return missing.copy(), missing.copy(), len(predicted_peaks), np.nan
+    raw_rmssd = np.sqrt(np.mean(np.diff(rr)[valid_pairs] ** 2))
+    raw_hrv = np.array([raw_sdnn, raw_rmssd])
+
+    if ibi_method == 'raw':
+        physiological_ratio = float(1.0 - np.mean(valid))
+        return raw_hrv, raw_hrv.copy(), len(predicted_peaks), physiological_ratio
+
+    if ibi_method == 'remove':
+        cleaned_rr, removal_ratio, normal_mask = _remove_abnormal_rr_intervals(
+            rr,
+            threshold=deviation_threshold,
+            min_rr_ms=min_rr_ms,
+            max_rr_ms=max_rr_ms,
+            reject_ratio=reject_ratio,
+        )
+        if cleaned_rr is None:
+            missing = np.array([np.nan, np.nan])
+            return raw_hrv, missing, len(predicted_peaks), removal_ratio
+        return (
+            raw_hrv,
+            _hrv_from_rr(cleaned_rr, original_valid_mask=normal_mask),
+            len(predicted_peaks),
+            removal_ratio,
+        )
+
+    if ibi_method != 'median':
+        raise ValueError(f"Unknown ibi_method: {ibi_method!r}")
+
+    corrected_rr, correction_ratio = _correct_rr_intervals(
+        rr,
+        threshold=0.20,
+        min_rr_ms=min_rr_ms,
+        max_rr_ms=max_rr_ms,
+    )
+
+    if len(corrected_rr) < 3:
+        missing = np.array([np.nan, np.nan])
+        return raw_hrv, missing, len(predicted_peaks), correction_ratio
+
+    sdnn = np.std(corrected_rr, ddof=1)
+    rmssd = np.sqrt(
+        np.mean(np.diff(corrected_rr) ** 2)
+    )
+
+    return (
+        raw_hrv,
+        np.array([sdnn, rmssd]),
+        len(predicted_peaks),
+        correction_ratio,
+    )
 
 
 def _regress_metrics(yt, yp):

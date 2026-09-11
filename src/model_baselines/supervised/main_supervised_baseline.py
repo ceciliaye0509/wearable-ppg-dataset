@@ -84,11 +84,35 @@ parser.add_argument('--use_preprocess', action='store_true')
 parser.add_argument('--task', default='hr', choices=['hr', 'hrv', 'peak', 'hrv_seg'])
 parser.add_argument('--device_name', default='watch', choices=['earring','ring','watch'])
 parser.add_argument('--use_deriv', type=int, default=1)
+parser.add_argument(
+    '--peak_channels', default='both', choices=['green', 'ir', 'both'],
+    help='PPG channels used by the peak task. Ignored for other tasks.',
+)
 parser.add_argument('--resample_hz', type=float, default=0)   # 0 = keep 100Hz; 50 recommended first
 parser.add_argument('--src_hz', type=float, default=100.0)
 parser.add_argument('--limit', type=int, default=0)           # cap windows/subject (smoke); 0 = no cap
 parser.add_argument('--agg', default='mean', choices=['mean','lstm'])
-
+parser.add_argument(
+    '--peak_backbone',
+    default='unet',
+    choices=['unet', 'dilated', 'kazemi'],
+    help='Peak detector: U-Net, our dilated model, or Kazemi et al. architecture.',
+)
+parser.add_argument(
+    '--ibi_method',
+    default='median',
+    choices=['raw', 'median', 'remove'],
+    help='IBI handling: none, local-median replacement, or remove/reject ablation.',
+)
+parser.add_argument('--min_rr_ms', type=float, default=300.0)
+parser.add_argument('--max_rr_ms', type=float, default=2000.0)
+parser.add_argument('--ibi_deviation_threshold', type=float, default=0.20)
+parser.add_argument('--ibi_reject_ratio', type=float, default=0.50)
+parser.add_argument(
+    "--only_target",
+    default=None,
+    help="Run only one held-out participant, e.g. P1.",
+)
 # ── Reproducibility ───────────────────────────────────────────────────────────
 
 def set_seed(seed: int):
@@ -110,7 +134,11 @@ def build_model(args):
     All models receive n_channels=args.n_feature
     (1 for single, 4 for multisite, 8 for multisite+accel).
     """
-    if args.task == 'peak':                         # Path B: per-sample output, uses built-in U-Net
+    if args.task == 'peak':
+        if args.peak_backbone == 'kazemi':
+            return H.KazemiPeakNet(H.n_input_channels(args))
+        if args.peak_backbone == 'dilated':
+            return H.DilatedPeakNet(H.n_input_channels(args))
         return H.PeakNet(H.n_input_channels(args))
     if args.task == 'hrv_seg':
         return H.SegNet(H.n_input_channels(args), agg=args.agg) # Path C
@@ -149,7 +177,8 @@ def build_model(args):
 def train(args, train_loaders, val_loader, model, device, optimizer, criterion,
           save_dir='results/'):
     """
-    Train with early stopping based on validation loss.
+    Train with early stopping based on validation event F1 for peak detection,
+    and validation loss for the other tasks.
     Saves the best checkpoint to save_dir/{model_name}.pt.
 
     Returns the best model state dict.
@@ -158,6 +187,7 @@ def train(args, train_loaders, val_loader, model, device, optimizer, criterion,
     checkpoint_path = os.path.join(save_dir, args.model_name + '.pt')
 
     min_val_loss  = float('inf')
+    best_val_f1   = -float('inf')
     best_state    = None
     epochs_no_imp = 0
 
@@ -200,19 +230,38 @@ def train(args, train_loaders, val_loader, model, device, optimizer, criterion,
                 n_val_batches += 1
         val_loss /= n_val_batches
 
-        if val_loss < min_val_loss:
+        val_f1 = None
+        if args.task == 'peak':
+            _, val_f1 = H.select_peak_threshold(
+                val_loader, model, device, args,
+                return_score=True, quiet=True,
+            )
+
+        improved = (
+            val_f1 > best_val_f1
+            if args.task == 'peak'
+            else val_loss < min_val_loss
+        )
+
+        if improved:
             min_val_loss  = val_loss
+            if val_f1 is not None:
+                best_val_f1 = val_f1
             best_state    = deepcopy(model.state_dict())
             epochs_no_imp = 0
             torch.save({'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict()},
                        checkpoint_path)
+            metric_text = f" | Val event F1: {val_f1:.3f}" if val_f1 is not None else ""
             print(f"    Epoch {epoch+1:>3}/{args.n_epoch}  |  "
-                  f"Train Loss: {train_loss:.4f}  |  Val Loss: {val_loss:.4f} *")
+                  f"Train Loss: {train_loss:.4f}  |  Val Loss: {val_loss:.4f}"
+                  f"{metric_text} *")
         else:
             epochs_no_imp += 1
+            metric_text = f" | Val event F1: {val_f1:.3f}" if val_f1 is not None else ""
             print(f"    Epoch {epoch+1:>3}/{args.n_epoch}  |  "
-                  f"Train Loss: {train_loss:.4f}  |  Val Loss: {val_loss:.4f}")
+                  f"Train Loss: {train_loss:.4f}  |  Val Loss: {val_loss:.4f}"
+                  f"{metric_text}")
             if args.patience > 0 and epochs_no_imp >= args.patience:
                 print(f"    Early stopping at epoch {epoch + 1} "
                       f"(no improvement for {args.patience} epochs)")
@@ -299,6 +348,11 @@ def train_sup(args, seed_idx: int):
         f"_seed{seed_idx}"
         f"_lr{args.lr}_bs{args.batch_size}"
     )
+    if args.task == 'peak':
+        args.model_name += (
+            f"_peak{args.peak_backbone}_{args.peak_channels}"
+            f"_ibi{args.ibi_method}"
+        )
 
     os.makedirs(args.logdir, exist_ok=True)
     log_path = os.path.join(args.logdir, args.model_name + '.log')
@@ -312,6 +366,14 @@ def train_sup(args, seed_idx: int):
 
     model_test = build_model(args).to(device)
     model_test.load_state_dict(best_state)
+
+    if args.task == 'peak':
+        args._peak_threshold = H.select_peak_threshold(
+            val_loader,
+            model_test,
+            device,
+            args,
+        )
 
     pred_path = f"predictions/{args.backbone}_{args.dataset}_{position_tag}.txt"
 
@@ -383,6 +445,19 @@ if __name__ == '__main__':
 
     participants = configure_dataset(args)
 
+    if args.only_target is not None:
+        if args.only_target not in participants:
+            parser.error(
+                f"--only_target {args.only_target!r} is not in "
+                f"available participants: {participants}"
+            )
+
+        participants = [args.only_target]
+
+        print(
+            f"Only target participant: "
+            f"{args.only_target}"
+        )
     all_seed_results = []
 
     for seed_idx in range(1):  # change to range(3) to run multiple seeds
@@ -431,14 +506,56 @@ if __name__ == '__main__':
 
     # ── Save summary to file ─────────────────────────────────────────────────
     os.makedirs("results", exist_ok=True)
-    summary_path = f"results/summary_{args.backbone}_{args.dataset}_{args.position or 'multisite'}.txt"
+    summary_path = (
+        f"results/summary_{args.backbone}_{args.dataset}_"
+        f"{args.position or 'multisite'}.txt"
+    )
+
     with open(summary_path, "w") as f:
         f.write(f"Backbone     : {args.backbone}\n")
         f.write(f"Dataset      : {args.dataset}\n")
         f.write(f"Position     : {args.position or 'multisite'}\n")
-        f.write(f"Participants : {flat.shape[0]}\n")
-        f.write(f"\n")
-        f.write(f"MAE  : {overall_mean[0]:.2f} ± {overall_std[0]:.2f} bpm\n")
-        f.write(f"RMSE : {overall_mean[1]:.2f} ± {overall_std[1]:.2f} bpm\n")
-        f.write(f"R    : {overall_mean[2]:.4f} ± {overall_std[2]:.4f}\n")
+
+        if args.task in ("hrv", "peak", "hrv_seg"):
+            f.write(f"Participants : {len(flat)}\n\n")
+
+            for key in H.LABEL_KEYS:
+                r2_values = np.array(
+                    [result[key]["r2"] for result in flat]
+                )
+                r_values = np.array(
+                    [result[key]["r"] for result in flat]
+                )
+                mae_values = np.array(
+                    [result[key]["mae"] for result in flat]
+                )
+
+                f.write(f"{key}\n")
+                f.write(
+                    f"  R2  : {np.nanmean(r2_values):.3f} "
+                    f"+/- {np.nanstd(r2_values):.3f}\n"
+                )
+                f.write(
+                    f"  r   : {np.nanmean(r_values):.3f} "
+                    f"+/- {np.nanstd(r_values):.3f}\n"
+                )
+                f.write(
+                    f"  MAE : {np.nanmean(mae_values):.2f} "
+                    f"+/- {np.nanstd(mae_values):.2f} ms\n\n"
+                )
+        else:
+            f.write(f"Participants : {flat.shape[0]}\n\n")
+            f.write(
+                f"MAE  : {overall_mean[0]:.2f} "
+                f"+/- {overall_std[0]:.2f} bpm\n"
+            )
+            f.write(
+                f"RMSE : {overall_mean[1]:.2f} "
+                f"+/- {overall_std[1]:.2f} bpm\n"
+            )
+            f.write(
+                f"R    : {overall_mean[2]:.4f} "
+                f"+/- {overall_std[2]:.4f}\n"
+            )
+
     print(f"Summary saved to {summary_path}")
