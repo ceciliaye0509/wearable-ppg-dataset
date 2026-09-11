@@ -185,7 +185,56 @@ The heuristic baseline and model results must not be ranked by MAE alone when th
 
 > Frozen PulsePPG with nested Ridge remains the strongest and most stable foundation-model baseline. Partial fine-tuning improves SDNN relative to a matched head-only control, but provides no consistent participant-level advantage over Frozen Ridge and does not improve RMSSD.
 
-## 7. Next experiments（按优先级）
+
+## 7. Literature basis（文献与方法依据）
+
+Among the five supplied papers, Kazemi et al. (2022) is the only study that directly proposes an open-source machine-learning method for PPG peak detection. The other papers primarily validate wearable-derived HRV against ECG and therefore support our HRV extraction and evaluation design rather than our trainable models.
+
+| Source | Method used | Relevance to our pipeline |
+|---|---|---|
+| Kazemi et al. (2022) | Seven-layer dilated CNN, sigmoid peak probabilities, Adam, ordinary BCE, and threshold/local-maximum peak decoding | Direct basis for the dilated PeakNet concept |
+| Sarhaddi et al. (2022) | Five-minute windows, learned PPG peak detection, abnormal NN removal, and SDNN/RMSSD extraction | Basis for peak → cleaned IBI → HRV |
+| Flatt et al. (2025) | Controlled PPG–ECG validation with strict QC and Bland–Altman analysis | Supports QC, bias, and agreement analysis |
+| Sinichi et al. (2026) | Five-minute wearable–ECG comparison stratified by movement, sleep, and posture | Supports context-aware QC |
+| Tao et al. (2026) | Synchronized ring/chest-strap comparison with participant-level analysis | Supports synchronization and participant-level reporting |
+
+### Open-source Kazemi implementation
+
+Code: https://github.com/HealthSciTech/Robust_PPG_PD
+
+The official implementation uses 100-Hz, 15-second inputs and seven Conv1D layers with kernel size 3. Dilation rates are `1, 2, 4, 8, 16, 32, 64`, hidden activations are ELU, and the final layer outputs sigmoid peak probabilities. Training uses Adam and ordinary binary cross-entropy. Its peak finder applies thresholding, local-maximum detection, and a 0.35-second minimum-distance rule that retains the stronger of two nearby candidates.
+
+The repository provides TensorFlow research code and data-processing examples but not a directly reusable PyTorch package or clearly packaged pretrained checkpoint. We should therefore reproduce the architecture in PyTorch rather than copy the script directly.
+
+### Which choices are ours?
+
+| Component | Basis |
+|---|---|
+| Dilated CNN and ordinary BCE baseline | Directly supported by Kazemi et al. |
+| Peak → cleaned IBI → SDNN/RMSSD | Supported by the supplied PRV literature |
+| Weighted BCE + Dice | Our adaptation for class imbalance |
+| Gaussian peak labels | Our implementation |
+| SciPy `find_peaks` and validation-selected threshold | Our event-decoding design |
+| Local-median IBI replacement | Our empirically selected correction |
+| Frozen PulsePPG/PaPaGei + Ridge | Our transfer-learning baseline |
+| Mean-pooled 5-minute embeddings | Our aggregation design |
+| Nested participant-grouped LOSO | Our leakage-control protocol |
+| Neural head and partial fine-tuning | Our ablation experiments |
+
+Therefore, the current pipeline should be described as **literature-informed**, not as a strict reproduction.
+
+### Recommended reproduction experiment
+
+We will implement the official Kazemi seven-layer dilated CNN in PyTorch and compare:
+
+1. ordinary BCE versus weighted BCE + Dice;
+2. the paper-style 0.35-second peak finder versus SciPy `find_peaks`;
+3. event F1, peak-count error, HRV MAE/R²/r, and coverage under the same participant-level split.
+
+This experiment will determine whether the current bottleneck is caused primarily by the architecture, training objective, or peak decoder.
+
+
+## 8. Next experiments（按优先级）
 
 1. **Highest priority:** rerun finalized Own PeakNet on Earring/Green with complete 16-fold LOSO, Dilated backbone, median IBI correction, Green input, and validation event-F1 checkpoint selection.
 2. **Highest priority:** regenerate exact PaPaGei pooled and participant-level metrics from its prediction CSVs.
@@ -195,7 +244,7 @@ The heuristic baseline and model results must not be ranked by MAE alone when th
 6. Treat PulsePPG head-only and partial fine-tuning as completed ablations; do not begin a large fine-tuning sweep unless a new hypothesis targets participant calibration or temporal aggregation.
 7. Investigate temporal or beat-aware aggregation for RMSSD, since global 5-minute embeddings and current regressors substantially shrink within-participant variability.
 
-## 8. Cautions
+## 9. Cautions
 
 - P1 smoke tests are diagnostic and cannot establish population-level superiority.
 - Thresholds, checkpoint epochs, channel choices, and IBI gates must be chosen without using the held-out test participant.
