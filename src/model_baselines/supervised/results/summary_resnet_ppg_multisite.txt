@@ -1,3 +1,0 @@
-Backbone     : resnet
-Dataset      : ppg
-Position     : multisite

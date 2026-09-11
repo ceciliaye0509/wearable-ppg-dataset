@@ -29,3 +29,20 @@ src/heuristic_baselines/motion_window_sweep.py
 src/heuristic_baselines/generate_scatter_plots.py
 src/heuristic_baselines/bench_participant.py
 src/heuristic_baselines/step3_sqi_sweep.py
+# Supervised-model generated artifacts
+/log/
+/results/
+
+src/model_baselines/supervised/log/*.log
+src/model_baselines/supervised/results/*.pt
+src/model_baselines/supervised/results/*.pth
+src/model_baselines/supervised/results/*.ckpt
+src/model_baselines/supervised/results/summary_*.txt
+
+# Local backup and notebook files
+src/model_baselines/supervised/*.before_*.py
+src/model_baselines/supervised/*.bak_before_*
+src/model_baselines/supervised/.ipynb_checkpoints/
+
+# Accidental command-output file
+/-o
