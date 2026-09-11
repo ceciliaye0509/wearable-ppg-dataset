@@ -127,19 +127,40 @@ Partial fine-tuning improves SDNN relative to the matched head-only control, but
 
 Prediction shrinkage remains substantial. For Partial FT, pooled predicted-versus-true standard deviations were `10.464/20.693 ms` for SDNN and `6.541/12.598 ms` for RMSSD. The model therefore recovers only about half of the observed HRV variation. Independent manual formula checks exactly reproduced the NumPy/scikit-learn MAE, R², and Pearson r values, ruling out metric implementation error.
 
-## 5. PaPaGei frozen baseline（待正式汇总）
+## 5. PaPaGei frozen baseline（正式 16-fold LOSO）
 
-PaPaGei-S uses 125-Hz, 10-second segments; 30 segment embeddings are averaged to form each 5-minute 512-D representation. It uses the same outer LOSO and nested grouped Ridge design as PulsePPG.
+PaPaGei-S (commit `0c537dad4d2850e15b724260de820dd68d77f0b0`) resamples PPG from 100 Hz to 125 Hz and applies pyPPG filtering at 0.5–12 Hz (order 4). Each 5-minute window is split into 30 ten-second segments, and their 512-D embeddings are mean-pooled. Evaluation uses outer participant LOSO, five-fold inner GroupKFold for Ridge alpha selection, and training-only feature/target scaling. Each device contains 11,788 held-out windows.
 
-Available run summaries indicate approximate fold-level MAE:
+### 5.1 Pooled results across 11,788 held-out windows
 
-| Device/Channel | SDNN MAE | RMSSD MAE |
-|---|---:|---:|
-| Earring/Green | ~15.16 | ~12.19 |
-| Ring/Green | ~13.75 | ~10.45 |
-| Watch/Green | ~16.68 | ~11.87 |
+| Device/Channel | SDNN MAE | SDNN R² | SDNN r | RMSSD MAE | RMSSD R² | RMSSD r |
+|---|---:|---:|---:|---:|---:|---:|
+| Earring/Green | 15.04 | -0.004 | 0.215 | 11.29 | -0.203 | 0.053 |
+| Ring/Green | **14.82** | **0.029** | **0.256** | **9.84** | **0.064** | **0.325** |
+| Watch/Green | 17.36 | -0.269 | -0.229 | 10.83 | -0.152 | -0.141 |
 
-These PaPaGei aggregate values should be regenerated from its prediction CSV before formal reporting. As with PulsePPG, every displayed fold selected alpha `1000`, indicating boundary-limited regularization search.
+### 5.2 Participant-mean LOSO results
+
+| Device/Channel | SDNN MAE | SDNN R² | SDNN r | RMSSD MAE | RMSSD R² | RMSSD r |
+|---|---:|---:|---:|---:|---:|---:|
+| Earring/Green | 15.16 ± 4.62 | -0.860 ± 1.274 | 0.235 ± 0.209 | 12.19 ± 3.72 | -2.207 ± 2.864 | 0.228 ± 0.313 |
+| Ring/Green | **13.75 ± 3.98** | **-0.570 ± 0.817** | **0.202 ± 0.190** | **10.45 ± 3.34** | **-1.462 ± 2.399** | **0.166 ± 0.297** |
+| Watch/Green | 16.68 ± 5.55 | -1.300 ± 1.766 | 0.081 ± 0.227 | 11.87 ± 3.98 | -2.099 ± 3.270 | 0.027 ± 0.136 |
+
+### 5.3 Interpretation
+
+Ring/Green is PaPaGei’s strongest configuration.
+
+Compared with Frozen PulsePPG:
+
+- PaPaGei is weaker for SDNN on all three devices.
+- For Earring RMSSD, the two methods have almost identical MAE, but PulsePPG has better R² and Pearson r.
+- For Ring RMSSD, PaPaGei achieves lower MAE and higher R² (`MAE=9.84 ms`, `R²=0.064`), while its correlation is nearly identical to PulsePPG (`0.325` versus `0.326`).
+- For Watch RMSSD, PaPaGei has slightly lower MAE, but its pooled correlation is negative (`r=-0.141`). Therefore, it should not be described as reliably tracking window-to-window HRV variation.
+
+The Watch result also shows why pooled and participant-mean metrics should both be reported: its fold-mean correlation is slightly positive, while its pooled correlation is negative. This may be caused by participant-level calibration differences and unequal participant sample sizes; it is not by itself evidence of an evaluation bug.
+
+The alpha search ended at the maximum tested value (`1000`), indicating that Ridge regularization may still be boundary-limited. A wider alpha grid should therefore be tested before treating PaPaGei as fully tuned.
 
 ## 6. Cross-method interpretation
 
