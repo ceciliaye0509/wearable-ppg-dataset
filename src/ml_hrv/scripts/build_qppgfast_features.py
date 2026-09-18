@@ -155,17 +155,26 @@ def _participant_rows(path, split, hrv, qppgfast, bandpass_filter):
         # cache's public contract intentionally shortens these to green/ir.
         channel_index = channels.index("green") if "green" in channels else channels.index("ppg_green")
         count = int(np.asarray(data["ecg_rmssd_corrected_ms"]).shape[0])
+        # NpzFile reopens/decompresses a member on every ``data[name]``
+        # access.  Load each required participant array once; otherwise a
+        # 500-window participant repeatedly decompresses several GB of data.
+        values_all = np.asarray(data["ppg_rawslot_values"][:, device_index, channel_index], dtype=np.float64)
+        times_all = np.asarray(data["ppg_rawslot_timestamp_ms"][:, device_index, channel_index], dtype=np.float64)
+        masks_all = np.asarray(data["ppg_rawslot_mask"][:, device_index, channel_index], dtype=bool)
+        grids_all = np.asarray(data["ppg_grid_timestamp_ms"], dtype=np.float64)
+        ratios_all = np.asarray(data["ppg_rawslot_valid_sample_ratio"][:, device_index, channel_index], dtype=np.float64)
+        motion_all = np.asarray(data["accel_motion_mean_mag"][:, device_index], dtype=np.float64)
         for index in range(count):
-            values = np.asarray(data["ppg_rawslot_values"][index, device_index, channel_index], dtype=np.float64)
-            times = np.asarray(data["ppg_rawslot_timestamp_ms"][index, device_index, channel_index], dtype=np.float64)
-            mask = np.asarray(data["ppg_rawslot_mask"][index, device_index, channel_index], dtype=bool)
-            grid = np.asarray(data["ppg_grid_timestamp_ms"][index], dtype=np.float64)
-            raw_ratio = float(data["ppg_rawslot_valid_sample_ratio"][index, device_index, channel_index])
+            values = values_all[index]
+            times = times_all[index]
+            mask = masks_all[index]
+            grid = grids_all[index]
+            raw_ratio = float(ratios_all[index])
             signal, grid_times, max_gap = _strict_interp100(values, times, mask, grid, raw_ratio)
             row = {
                 "participant": participant, "window_index": index, "device": "Earring", "channel": "green", "split": split,
                 "qppg_valid_sample_ratio": raw_ratio, "qppg_max_raw_gap_ms": max_gap,
-                "accel_motion_mean_mag": float(data["accel_motion_mean_mag"][index, device_index]), "qppg_polarity": "invalid",
+                "accel_motion_mean_mag": float(motion_all[index]), "qppg_polarity": "invalid",
             }
             if len(signal) >= 50:
                 try:
