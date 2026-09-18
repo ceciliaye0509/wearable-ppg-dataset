@@ -150,7 +150,10 @@ def _participant_rows(path, split, hrv, qppgfast, bandpass_filter):
         participant = str(np.asarray(data["participant"]).item()) if "participant" in data.files else path.stem.rsplit("_", 1)[-1]
         devices = [str(x) for x in np.asarray(data["devices"]).tolist()]
         channels = [str(x) for x in np.asarray(data["channels"]).tolist()]
-        device_index, channel_index = devices.index("Earring"), channels.index("green")
+        device_index = devices.index("Earring")
+        # The raw release names channels ``ppg_green``/``ppg_ir``; the ML
+        # cache's public contract intentionally shortens these to green/ir.
+        channel_index = channels.index("green") if "green" in channels else channels.index("ppg_green")
         count = int(np.asarray(data["ecg_rmssd_corrected_ms"]).shape[0])
         for index in range(count):
             values = np.asarray(data["ppg_rawslot_values"][index, device_index, channel_index], dtype=np.float64)
