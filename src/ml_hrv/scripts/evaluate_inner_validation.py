@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 
 from ml_hrv.config import DataConfig, EvaluationConfig, ExperimentConfig, ModelConfig, TrainConfig
 from ml_hrv.data.dataset import RawslotWindowDataset, collate_rawslot
+from ml_hrv.data.qppg import QPPGFeatureScaler
 from ml_hrv.data.splits import Fold, load_folds
 from ml_hrv.evaluation.evaluator import evaluate_model
 from ml_hrv.evaluation.metrics import regression_metrics
@@ -28,11 +29,13 @@ def _config(raw):
     )
 
 
-def _dataset(config, participants):
+def _dataset(config, participants, qppg_feature_scaler=None):
     return RawslotWindowDataset(
         config.data.cache_dir, participants, config.data.devices, config.data.segment_seconds,
         config.data.window_seconds, config.data.accel_mode, config.data.qc_only,
         config.data.cache_open_participants, ppg_channels=config.data.ppg_channels,
+        qppg_feature_csv=config.data.qppg_feature_csv if config.model.qppg_residual_enabled else None,
+        qppg_feature_scaler=qppg_feature_scaler,
     )
 
 
@@ -57,7 +60,21 @@ def main():
     frozen = {fold.name: fold for fold in load_folds(Path(args.run_dir) / "folds.json")}
     if frozen.get(saved_fold.name) != saved_fold:
         raise RuntimeError("checkpoint split differs from run-dir folds.json")
-    train_data, val_data = _dataset(config, saved_fold.train), _dataset(config, saved_fold.val)
+    train_data = _dataset(config, saved_fold.train)
+    qppg_scaler = None
+    if config.model.qppg_residual_enabled:
+        saved_qppg = payload.get("qppg_feature_scaler")
+        if not isinstance(saved_qppg, dict):
+            raise RuntimeError("qPPG residual checkpoint has no qPPG train-only scaler")
+        qppg_scaler = QPPGFeatureScaler.from_state_dict(saved_qppg)
+        recomputed_qppg = train_data.fit_qppg_feature_scaler()
+        if recomputed_qppg is None or not all(
+            np.allclose(getattr(qppg_scaler, field), getattr(recomputed_qppg, field))
+            for field in ("impute", "mean", "std", "base_median_ms")
+        ):
+            raise RuntimeError("checkpoint qPPG scaler is not train-only")
+        train_data.set_qppg_feature_scaler(qppg_scaler)
+    val_data = _dataset(config, saved_fold.val, qppg_scaler)
     scaler = TargetScaler.from_state_dict(payload["target_scaler"])
     recomputed = TargetScaler.fit(train_data.target_array())
     if not (np.allclose(scaler.mean, recomputed.mean) and np.allclose(scaler.std, recomputed.std)):
@@ -88,6 +105,7 @@ def main():
         "checkpoint": str(Path(args.checkpoint)), "checkpoint_epoch": int(payload["epoch"]),
         "best_validation_loss": float(payload["best_validation_loss"]), "fold": saved_fold.to_dict(),
         "n_validation_rows": len(rows), "train_only_scaler_match": True, "metrics": metrics,
+        "qppg_train_only_scaler_match": bool(config.model.qppg_residual_enabled),
     }
     (output / "inner_validation_metrics.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))

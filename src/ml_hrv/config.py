@@ -23,6 +23,9 @@ class DataConfig:
     accel_mode: str = "scalar"  # none | scalar; raw_xyz is a later ablation.
     qc_only: bool = True
     cache_open_participants: int = 4
+    # Optional PPG-only qPPGFast table keyed by participant/window/device/channel.
+    # It is used only by the residual ablation, never to derive labels.
+    qppg_feature_csv: str | None = None
 
 
 @dataclass
@@ -37,6 +40,7 @@ class ModelConfig:
     delay_min_ms: float = 100.0
     delay_max_ms: float = 700.0
     fusion_enabled: bool = False
+    qppg_residual_enabled: bool = False
 
 
 @dataclass
@@ -119,3 +123,8 @@ class ExperimentConfig:
             raise ValueError("direct_architecture must be causal_tcn or segnet_mean")
         if self.model.direct_architecture == "segnet_mean" and self.train.stage != "direct":
             raise ValueError("segnet_mean is the direct-only reproduction baseline")
+        if self.model.qppg_residual_enabled:
+            if self.train.stage != "direct":
+                raise ValueError("qPPG residual ablation is direct-only")
+            if not self.data.qppg_feature_csv:
+                raise ValueError("qPPG residual ablation requires data.qppg_feature_csv")

@@ -6,6 +6,7 @@ import torch
 from torch import nn
 
 from ml_hrv.config import ExperimentConfig
+from ml_hrv.data.qppg import QPPG_FEATURE_COLUMNS
 
 from .beat import BeatSequenceHead
 from .direct import DirectHRVHead, SegNetMeanHead
@@ -16,11 +17,13 @@ class RawContinuousHRVModel(nn.Module):
     def __init__(self, config: ExperimentConfig) -> None:
         super().__init__()
         config.validate()
+        self.config = config
         model = config.model
         signal_channels = len(config.data.ppg_channels)
+        qppg_feature_dim = len(QPPG_FEATURE_COLUMNS) if model.qppg_residual_enabled else 0
         if model.direct_architecture == "segnet_mean":
             self.encoder = PartnerSegNetEncoder(model.token_dim, signal_channels)
-            self.direct = SegNetMeanHead(model.token_dim, model.dropout)
+            self.direct = SegNetMeanHead(model.token_dim, model.dropout, qppg_feature_dim)
         else:
             self.encoder = MaskAwareSharedEncoder(
                 model.width,
@@ -35,6 +38,7 @@ class RawContinuousHRVModel(nn.Module):
                 model.dropout,
                 model.device_embedding_dim,
                 use_accel=config.data.accel_mode == "scalar",
+                qppg_feature_dim=qppg_feature_dim,
             )
         self.beat = BeatSequenceHead(
             model.width,
@@ -51,12 +55,20 @@ class RawContinuousHRVModel(nn.Module):
         jitter: torch.Tensor,
         device_id: torch.Tensor,
         accel: torch.Tensor | None = None,
+        qppg_features: torch.Tensor | None = None,
+        qppg_base_normalized: torch.Tensor | None = None,
         compute_beat: bool = True,
     ) -> dict[str, torch.Tensor]:
         tokens, local, coverage = self.encoder(values, mask, jitter)
-        direct = self.direct(tokens, device_id, accel)
+        direct = self.direct(tokens, device_id, accel, qppg_features)
+        direct_loc = direct["loc"]
+        if self.config.model.qppg_residual_enabled:
+            if qppg_base_normalized is None:
+                raise ValueError("qPPG residual model requires a normalized qPPG base prediction")
+            direct_loc = qppg_base_normalized + direct_loc
         outputs = {
-            "direct_loc": direct["loc"],
+            "direct_loc": direct_loc,
+            "direct_delta": direct["loc"],
             "direct_logvar": direct["logvar"],
             "segment_coverage": coverage,
         }

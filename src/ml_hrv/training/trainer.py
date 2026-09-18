@@ -26,11 +26,13 @@ class Trainer:
         config: ExperimentConfig,
         scaler: TargetScaler,
         device: torch.device,
+        qppg_feature_scaler_state: dict[str, object] | None = None,
     ) -> None:
         self.model = model.to(device)
         self.config = config
         self.scaler = scaler
         self.device = device
+        self.qppg_feature_scaler_state = qppg_feature_scaler_state
         self.loss = PipelineLoss(config, scaler)
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=config.train.learning_rate, weight_decay=config.train.weight_decay
@@ -44,8 +46,17 @@ class Trainer:
         with context:
             for raw_batch in loader:
                 batch = _move_batch(raw_batch, self.device)
+                qppg_features = batch.get("qppg_features")
+                qppg_base_normalized = None
+                if self.config.model.qppg_residual_enabled:
+                    qppg_base_ms = batch.get("qppg_base_ms")
+                    if not isinstance(qppg_base_ms, torch.Tensor) or not isinstance(qppg_features, torch.Tensor):
+                        raise RuntimeError("qPPG residual data was not present in the batch")
+                    qppg_base_normalized = self.scaler.encode(qppg_base_ms)
                 outputs = self.model(
                     batch["values"], batch["mask"], batch["jitter"], batch["device_id"], batch["accel"],
+                    qppg_features=qppg_features if isinstance(qppg_features, torch.Tensor) else None,
+                    qppg_base_normalized=qppg_base_normalized,
                     compute_beat=self.config.train.stage in {"beat_pretrain", "beat", "joint"},
                 )
                 losses = self.loss(outputs, batch)
@@ -121,6 +132,7 @@ class Trainer:
                     fold=fold.to_dict(),
                     target_scaler=self.scaler.state_dict(),
                     history=history,
+                    qppg_feature_scaler=self.qppg_feature_scaler_state,
                 )
             else:
                 stale += 1

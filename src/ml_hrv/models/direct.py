@@ -31,11 +31,16 @@ class DirectHRVHead(nn.Module):
         dropout: float = 0.15,
         device_embedding_dim: int = 8,
         use_accel: bool = True,
+        qppg_feature_dim: int = 0,
     ) -> None:
         super().__init__()
         self.device_embedding = nn.Embedding(3, device_embedding_dim)
         self.accel = nn.Sequential(nn.Linear(1, device_embedding_dim), nn.SiLU()) if use_accel else None
-        condition_dim = device_embedding_dim + (device_embedding_dim if use_accel else 0)
+        self.qppg = (
+            nn.Sequential(nn.Linear(qppg_feature_dim, device_embedding_dim), nn.SiLU())
+            if qppg_feature_dim else None
+        )
+        condition_dim = device_embedding_dim + (device_embedding_dim if use_accel else 0) + (device_embedding_dim if qppg_feature_dim else 0)
         self.condition = nn.Linear(condition_dim, token_dim)
         self.tcn = nn.Sequential(
             *[CausalResidualBlock(token_dim, 2**layer, dropout) for layer in range(tcn_layers)]
@@ -49,7 +54,8 @@ class DirectHRVHead(nn.Module):
         )
 
     def forward(
-        self, tokens: torch.Tensor, device_id: torch.Tensor, accel: torch.Tensor | None
+        self, tokens: torch.Tensor, device_id: torch.Tensor, accel: torch.Tensor | None,
+        qppg_features: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         condition = [self.device_embedding(device_id)]
         if self.accel is not None:
@@ -57,6 +63,10 @@ class DirectHRVHead(nn.Module):
                 raise ValueError("accel scalar is required by this model")
             # log1p limits the influence of rare high-motion windows.
             condition.append(self.accel(torch.log1p(accel.clamp_min(0.0))))
+        if self.qppg is not None:
+            if qppg_features is None:
+                raise ValueError("qPPG residual model requires qPPG quality features")
+            condition.append(self.qppg(qppg_features))
         conditioned = tokens + self.condition(torch.cat(condition, dim=-1)).unsqueeze(1)
         context = self.tcn(conditioned.transpose(1, 2)).transpose(1, 2)
         params = self.head(context[:, -1])
@@ -70,19 +80,26 @@ class DirectHRVHead(nn.Module):
 class SegNetMeanHead(nn.Module):
     """Partner SegNet's mean segment aggregation with corrected output semantics."""
 
-    def __init__(self, token_dim: int = 96, dropout: float = 0.15) -> None:
+    def __init__(self, token_dim: int = 96, dropout: float = 0.15, qppg_feature_dim: int = 0) -> None:
         super().__init__()
         self.head = nn.Sequential(
             nn.LayerNorm(token_dim),
             nn.Dropout(dropout),
             nn.Linear(token_dim, 2),
         )
+        self.qppg = nn.Linear(qppg_feature_dim, token_dim) if qppg_feature_dim else None
 
     def forward(
-        self, tokens: torch.Tensor, device_id: torch.Tensor, accel: torch.Tensor | None
+        self, tokens: torch.Tensor, device_id: torch.Tensor, accel: torch.Tensor | None,
+        qppg_features: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         del device_id, accel
-        loc = self.head(tokens.mean(1))
+        pooled = tokens.mean(1)
+        if self.qppg is not None:
+            if qppg_features is None:
+                raise ValueError("qPPG residual model requires qPPG quality features")
+            pooled = pooled + self.qppg(qppg_features)
+        loc = self.head(pooled)
         return {
             "loc": loc,
             "logvar": torch.zeros_like(loc),

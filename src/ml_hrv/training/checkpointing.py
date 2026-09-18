@@ -25,6 +25,7 @@ def save_checkpoint(
     fold: dict[str, Any],
     target_scaler: dict[str, Any],
     history: list[dict[str, float]],
+    qppg_feature_scaler: dict[str, Any] | None = None,
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,6 +42,7 @@ def save_checkpoint(
         "primary_input": "ppg_rawslot_values",
         "ppg_channels": list(config["data"]["ppg_channels"]),
         "history": history,
+        "qppg_feature_scaler": qppg_feature_scaler,
         "rng_state": {
             "python": random.getstate(),
             "numpy": np.random.get_state(),

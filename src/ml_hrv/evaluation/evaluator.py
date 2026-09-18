@@ -33,8 +33,17 @@ def evaluate_model(
     with torch.no_grad():
         for batch_index, raw_batch in enumerate(loader):
             batch = _move(raw_batch, device)
+            qppg_features = batch.get("qppg_features")
+            qppg_base_normalized = None
+            if config.model.qppg_residual_enabled:
+                qppg_base_ms = batch.get("qppg_base_ms")
+                if not isinstance(qppg_features, torch.Tensor) or not isinstance(qppg_base_ms, torch.Tensor):
+                    raise RuntimeError("qPPG residual data was not present in the evaluation batch")
+                qppg_base_normalized = scaler.encode(qppg_base_ms)
             outputs = model(
                 batch["values"], batch["mask"], batch["jitter"], batch["device_id"], batch["accel"],
+                qppg_features=qppg_features if isinstance(qppg_features, torch.Tensor) else None,
+                qppg_base_normalized=qppg_base_normalized,
                 compute_beat=beat_trained,
             )
             direct_ms = scaler.decode(outputs["direct_loc"])
@@ -107,6 +116,14 @@ def evaluate_model(
                     "accepted": not reasons,
                     "prediction_source": "direct",
                 }
+                if config.model.qppg_residual_enabled:
+                    row.update(
+                        qppg_base_rmssd_ms=float(raw_batch["qppg_base_ms"][index, 0]),
+                        qppg_base_sdnn_ms=float(raw_batch["qppg_base_ms"][index, 1]),
+                        qppg_valid=bool(float(raw_batch["qppg_valid"][index]) > 0.5),
+                        residual_rmssd_normalized=float(outputs["direct_delta"][index, 0]),
+                        residual_sdnn_normalized=float(outputs["direct_delta"][index, 1]),
+                    )
                 rows.append(row)
             if max_batches and batch_index + 1 >= max_batches:
                 break

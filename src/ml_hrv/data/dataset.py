@@ -15,6 +15,7 @@ from ml_hrv import DEVICE_NAMES
 from ml_hrv.physiology import reference_hrv_from_rpeaks
 
 from .staging import robust_stats_filename
+from .qppg import QPPGFeatureScaler, load_qppg_rows
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,8 @@ class RawslotWindowDataset(Dataset):
         cache_open_participants: int = 4,
         use_precomputed_stats: bool = True,
         ppg_channels: Iterable[str] = ("green", "ir"),
+        qppg_feature_csv: str | Path | None = None,
+        qppg_feature_scaler: QPPGFeatureScaler | None = None,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.participants = tuple(participants)
@@ -62,6 +65,8 @@ class RawslotWindowDataset(Dataset):
         self.accel_mode = accel_mode
         self.cache_open_participants = cache_open_participants
         self.use_precomputed_stats = use_precomputed_stats
+        self.qppg_rows = load_qppg_rows(qppg_feature_csv) if qppg_feature_csv else None
+        self.qppg_feature_scaler = qppg_feature_scaler
         if accel_mode not in {"none", "scalar"}:
             raise ValueError("Phase-one dataset supports accel_mode none/scalar")
 
@@ -104,6 +109,30 @@ class RawslotWindowDataset(Dataset):
         self.samples_per_segment = round(self.fs_hz * self.segment_seconds)
         self.n_segments = self.trailing_seconds // self.segment_seconds
         self.trailing_samples = round(self.fs_hz * self.trailing_seconds)
+        if self.qppg_rows is not None:
+            missing = [
+                (ref.participant, ref.window_index, DEVICE_NAMES[ref.device_index], channel)
+                for ref in self.refs for channel in self.channel_names
+                if (ref.participant, ref.window_index, DEVICE_NAMES[ref.device_index], channel) not in self.qppg_rows
+            ]
+            if missing:
+                raise ValueError("qPPG CSV has no row for raw-slot sample %r" % (missing[0],))
+
+    def fit_qppg_feature_scaler(self) -> QPPGFeatureScaler | None:
+        """Fit PPG-only imputation/scaling on this dataset's train rows only."""
+        if self.qppg_rows is None:
+            return None
+        rows = [
+            self.qppg_rows[(ref.participant, ref.window_index, DEVICE_NAMES[ref.device_index], self.channel_names[0])]
+            for ref in self.refs
+        ]
+        self.qppg_feature_scaler = QPPGFeatureScaler.fit(rows)
+        return self.qppg_feature_scaler
+
+    def set_qppg_feature_scaler(self, scaler: QPPGFeatureScaler | None) -> None:
+        if self.qppg_rows is not None and scaler is None:
+            raise ValueError("qPPG feature CSV requires a train-fitted scaler")
+        self.qppg_feature_scaler = scaler
 
     def __len__(self) -> int:
         return len(self.refs)
@@ -237,7 +266,7 @@ class RawslotWindowDataset(Dataset):
             # same adjacency-preserving routine used by the physiological branch.
             target = np.asarray(reference_hrv_from_rpeaks(rpeaks), dtype=np.float32)
             label_source = "ecg_rpeaks_short_adjacency_corrected_auxiliary"
-        return {
+        result = {
             "values": torch.from_numpy(values),
             "mask": torch.from_numpy(mask),
             "jitter": torch.from_numpy(jitter),
@@ -255,6 +284,19 @@ class RawslotWindowDataset(Dataset):
             "coverage": coverage,
             "label_source": label_source,
         }
+        if self.qppg_rows is not None:
+            if self.qppg_feature_scaler is None:
+                raise RuntimeError("fit or set qPPG feature scaler before iterating dataset")
+            if len(self.channel_names) != 1:
+                raise ValueError("qPPG residual ablation requires exactly one raw PPG channel")
+            row = self.qppg_rows[(ref.participant, ref.window_index, DEVICE_NAMES[ref.device_index], self.channel_names[0])]
+            qppg_features, qppg_base_ms = self.qppg_feature_scaler.transform(row)
+            result.update(
+                qppg_features=torch.from_numpy(qppg_features),
+                qppg_base_ms=torch.from_numpy(qppg_base_ms),
+                qppg_valid=torch.tensor(float(str(row.get("qppg_valid", "")).lower() == "true"), dtype=torch.float32),
+            )
+        return result
 
 
 def collate_rawslot(batch: list[dict[str, object]]) -> dict[str, object]:
@@ -262,6 +304,8 @@ def collate_rawslot(batch: list[dict[str, object]]) -> dict[str, object]:
     tensor_keys = (
         "values", "mask", "jitter", "accel", "motion_scalar", "device_id", "target_ms",
     )
+    if "qppg_features" in batch[0]:
+        tensor_keys = tensor_keys + ("qppg_features", "qppg_base_ms", "qppg_valid")
     result: dict[str, object] = {key: torch.stack([x[key] for x in batch]) for key in tensor_keys}
     for key in (
         "rpeaks_ms", "participant", "window_index", "window_start_ms", "device",
