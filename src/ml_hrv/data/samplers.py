@@ -10,12 +10,18 @@ from torch.utils.data import Sampler
 from .dataset import SampleRef
 
 
-class ParticipantDeviceBatchSampler(Sampler[list[int]]):
+class ParticipantDeviceBatchSampler(Sampler):
     """Sample windows uniformly by participant, then expand to three devices.
 
     Every dataset item remains one device.  Keeping the matched Earring/Ring/
     Watch items in the same batch makes multi-view consistency measurable while
     avoiding an unrealistic multi-device deployment input.
+
+    ``torch.utils.data.Sampler[list[int]]`` is a convenient type annotation on
+    Python 3.9+, but it is evaluated while creating the class and therefore
+    prevents importing this package in the partner's Python 3.8 ``water``
+    environment.  The sampler behavior is unchanged; batch indices remain
+    lists of integers.
     """
 
     def __init__(
