@@ -1,4 +1,4 @@
-"""Shared segment encoder for raw green/IR slots, masks, and timestamp jitter."""
+"""Shared segment encoder for selected raw PPG slots, masks, and timestamp jitter."""
 
 from __future__ import annotations
 
@@ -41,12 +41,20 @@ class MaskAwareSharedEncoder(nn.Module):
     """Encode each 10-second segment while retaining a beat-resolution map."""
 
     def __init__(
-        self, width: int = 24, token_dim: int = 96, dropout: float = 0.1, include_jitter: bool = True
+        self,
+        width: int = 24,
+        token_dim: int = 96,
+        dropout: float = 0.1,
+        include_jitter: bool = True,
+        signal_channels: int = 2,
     ) -> None:
         super().__init__()
+        if signal_channels < 1:
+            raise ValueError("signal_channels must be positive")
         self.include_jitter = include_jitter
-        # green, IR, two masks, and optionally two timestamp-jitter channels.
-        input_channels = 6 if include_jitter else 4
+        self.signal_channels = signal_channels
+        # Selected PPG channels, their masks, and optionally their jitter.
+        input_channels = signal_channels * (3 if include_jitter else 2)
         self.stem = nn.Sequential(
             nn.Conv1d(input_channels, width, 9, padding=4),
             nn.GroupNorm(4, width),
@@ -69,8 +77,10 @@ class MaskAwareSharedEncoder(nn.Module):
     def forward(
         self, values: torch.Tensor, mask: torch.Tensor, jitter: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if values.ndim != 4 or values.shape[2] != 2:
-            raise ValueError("values must have shape (batch, segments, 2, samples)")
+        if values.ndim != 4 or values.shape[2] != self.signal_channels:
+            raise ValueError(
+                f"values must have shape (batch, segments, {self.signal_channels}, samples)"
+            )
         if mask.shape != values.shape or jitter.shape != values.shape:
             raise ValueError("mask and jitter must match values")
         batch, segments, channels, length = values.shape
@@ -93,12 +103,15 @@ class MaskAwareSharedEncoder(nn.Module):
 class PartnerSegNetEncoder(nn.Module):
     """Faithful shared 10-second CNN from the partner SegNet, with raw masks."""
 
-    def __init__(self, token_dim: int = 64) -> None:
+    def __init__(self, token_dim: int = 64, signal_channels: int = 2) -> None:
         super().__init__()
+        if signal_channels < 1:
+            raise ValueError("signal_channels must be positive")
+        self.signal_channels = signal_channels
         # The original has three stride-2 Conv/BatchNorm/ReLU blocks.  Four
-        # channels here are green, IR, and their masks; no interpolated signal.
+        # inputs are selected PPG channels and their masks; no interpolation.
         self.net = nn.Sequential(
-            nn.Conv1d(4, 32, 7, 2, 3), nn.BatchNorm1d(32), nn.ReLU(True),
+            nn.Conv1d(signal_channels * 2, 32, 7, 2, 3), nn.BatchNorm1d(32), nn.ReLU(True),
             nn.Conv1d(32, 64, 7, 2, 3), nn.BatchNorm1d(64), nn.ReLU(True),
             nn.Conv1d(64, token_dim, 7, 2, 3), nn.BatchNorm1d(token_dim), nn.ReLU(True),
             nn.AdaptiveAvgPool1d(1),
@@ -109,6 +122,8 @@ class PartnerSegNetEncoder(nn.Module):
     ) -> tuple[torch.Tensor, None, torch.Tensor]:
         del jitter
         batch, segments, channels, length = values.shape
+        if channels != self.signal_channels:
+            raise ValueError(f"Expected {self.signal_channels} PPG channels, got {channels}")
         normalized = masked_channel_normalize(values, mask)
         maskf = mask.to(values.dtype)
         x = torch.cat((normalized, maskf), dim=2).reshape(batch * segments, channels * 2, length)

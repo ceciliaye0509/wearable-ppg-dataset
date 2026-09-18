@@ -51,6 +51,22 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(output["beat_heatmap_logits"].shape, (3, 2, 200))
         output["direct_loc"].sum().backward()
 
+    def test_green_only_model_is_a_real_single_channel_contract(self):
+        config = self.tiny_config()
+        config.data.ppg_channels = ("green",)
+        model = RawContinuousHRVModel(config)
+        shape = (2, 2, 1, 200)
+        output = model(
+            torch.randn(shape),
+            torch.ones(shape, dtype=torch.bool),
+            torch.zeros(shape),
+            torch.tensor([0, 1]),
+            torch.rand(2, 1),
+        )
+        self.assertEqual(model.encoder.signal_channels, 1)
+        self.assertEqual(output["direct_loc"].shape, (2, 2))
+        self.assertEqual(output["beat_heatmap_logits"].shape, (2, 2, 200))
+
     def test_partner_segnet_rawslot_baseline(self):
         config = self.tiny_config()
         config.model.direct_architecture = "segnet_mean"
@@ -233,6 +249,7 @@ class PipelineTests(unittest.TestCase):
             payload = load_checkpoint(path)
             self.assertEqual(payload["target_order"], ["rmssd_ms", "sdnn_ms"])
             self.assertEqual(payload["primary_input"], "ppg_rawslot_values")
+            self.assertEqual(payload["ppg_channels"], ["green", "ir"])
 
     def test_window_prediction_artifacts(self):
         rows = []

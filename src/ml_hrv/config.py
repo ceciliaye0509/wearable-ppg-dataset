@@ -17,6 +17,9 @@ class DataConfig:
     update_seconds: int = 30
     segment_seconds: int = 10
     devices: tuple[str, ...] = ("Earring", "Ring", "Watch")
+    # Select raw channels by name.  Keeping this in the experiment contract is
+    # important: a green-only model is not a green+IR model with IR zeroed.
+    ppg_channels: tuple[str, ...] = ("green", "ir")
     accel_mode: str = "scalar"  # none | scalar; raw_xyz is a later ablation.
     qc_only: bool = True
     cache_open_participants: int = 4
@@ -94,6 +97,12 @@ class ExperimentConfig:
             raise ValueError("update_seconds must be positive")
         if self.data.accel_mode not in {"none", "scalar"}:
             raise ValueError("phase one supports accel_mode='none' or 'scalar'")
+        if not self.data.ppg_channels or any(
+            channel not in {"green", "ir"} for channel in self.data.ppg_channels
+        ):
+            raise ValueError("ppg_channels must be a non-empty ordered subset of ('green', 'ir')")
+        if len(set(self.data.ppg_channels)) != len(self.data.ppg_channels):
+            raise ValueError("ppg_channels must not contain duplicates")
         if self.train.stage not in {"direct", "beat_pretrain", "beat", "joint"}:
             raise ValueError("stage must be direct, beat_pretrain, beat, or joint")
         if self.train.num_workers == 0 and self.train.persistent_workers:

@@ -1,4 +1,4 @@
-"""The deployable single-device green+IR continuous HRV network."""
+"""The deployable single-device raw PPG continuous HRV network."""
 
 from __future__ import annotations
 
@@ -17,12 +17,17 @@ class RawContinuousHRVModel(nn.Module):
         super().__init__()
         config.validate()
         model = config.model
+        signal_channels = len(config.data.ppg_channels)
         if model.direct_architecture == "segnet_mean":
-            self.encoder = PartnerSegNetEncoder(model.token_dim)
+            self.encoder = PartnerSegNetEncoder(model.token_dim, signal_channels)
             self.direct = SegNetMeanHead(model.token_dim, model.dropout)
         else:
             self.encoder = MaskAwareSharedEncoder(
-                model.width, model.token_dim, model.dropout, model.use_timestamp_jitter
+                model.width,
+                model.token_dim,
+                model.dropout,
+                model.use_timestamp_jitter,
+                signal_channels,
             )
             self.direct = DirectHRVHead(
                 model.token_dim,

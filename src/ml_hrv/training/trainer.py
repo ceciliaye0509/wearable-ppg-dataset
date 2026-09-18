@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from pathlib import Path
 
 import torch
@@ -48,6 +49,18 @@ class Trainer:
                     compute_beat=self.config.train.stage in {"beat_pretrain", "beat", "joint"},
                 )
                 losses = self.loss(outputs, batch)
+                # These are not selection losses.  They are an early warning
+                # that a direct regressor is collapsing to a near-constant
+                # prediction while the held-out labels still vary.
+                if self.config.train.stage != "beat_pretrain":
+                    target_ms = batch["target_ms"]
+                    assert isinstance(target_ms, torch.Tensor)
+                    target_normalized = self.scaler.encode(target_ms)
+                    totals["pred_norm_mean"] += float(outputs["direct_loc"].detach().mean())
+                    totals["pred_norm_std"] += float(outputs["direct_loc"].detach().std(unbiased=False))
+                    totals["target_norm_mean"] += float(target_normalized.detach().mean())
+                    totals["target_norm_std"] += float(target_normalized.detach().std(unbiased=False))
+                    totals["pred_logvar_mean"] += float(outputs["direct_logvar"].detach().mean())
                 if training:
                     self.optimizer.zero_grad(set_to_none=True)
                     losses["total"].backward()
@@ -65,6 +78,8 @@ class Trainer:
     def fit(self, train_loader, val_loader, fold: Fold, output_dir: str | Path) -> Path:
         output_dir = Path(output_dir)
         checkpoint = output_dir / "checkpoints" / f"{fold.name}_{self.config.train.stage}.pt"
+        history_path = output_dir / "learning_curves" / f"{fold.name}_{self.config.train.stage}.json"
+        history_path.parent.mkdir(parents=True, exist_ok=True)
         history: list[dict[str, float]] = []
         best = float("inf")
         stale = 0
@@ -80,9 +95,17 @@ class Trainer:
             row.update({f"train_{k}": v for k, v in train_metrics.items()})
             row.update({f"val_{k}": v for k, v in val_metrics.items()})
             history.append(row)
+            # Write every epoch, including epochs that did not improve the
+            # checkpoint.  This is the source of truth for the first-fold
+            # curve gate before wider cross-validation is launched.
+            temporary_history = history_path.with_suffix(".json.tmp")
+            temporary_history.write_text(json.dumps(history, indent=2), encoding="utf-8")
+            temporary_history.replace(history_path)
             print(
                 f"{fold.name} epoch={epoch:03d} "
-                f"train={train_metrics['total']:.5f} val={val_metrics['total']:.5f}",
+                f"train={train_metrics['total']:.5f} val={val_metrics['total']:.5f} "
+                f"val_pred_sigma={val_metrics.get('pred_norm_std', float('nan')):.3f} "
+                f"val_target_sigma={val_metrics.get('target_norm_std', float('nan')):.3f}",
                 flush=True,
             )
             if val_metrics["total"] < best:

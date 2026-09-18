@@ -39,6 +39,7 @@ def save_checkpoint(
         "target_scaler": target_scaler,
         "target_order": ["rmssd_ms", "sdnn_ms"],
         "primary_input": "ppg_rawslot_values",
+        "ppg_channels": list(config["data"]["ppg_channels"]),
         "history": history,
         "rng_state": {
             "python": random.getstate(),

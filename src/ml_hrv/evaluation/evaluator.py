@@ -74,6 +74,7 @@ def evaluate_model(
                     "window_index": int(raw_batch["window_index"][index]),
                     "window_start_ms": float(raw_batch["window_start_ms"][index]),
                     "device": raw_batch["device"][index],
+                    "ppg_channels": "+".join(config.data.ppg_channels),
                     "label_source": raw_batch["label_source"][index],
                     "coverage": coverage,
                     "accel_motion_mean_mag": float(raw_batch["motion_scalar"][index, 0]),

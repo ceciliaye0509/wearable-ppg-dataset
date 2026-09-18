@@ -41,6 +41,7 @@ def make_dataset(config: ExperimentConfig, participants, trailing_seconds: int |
         config.data.accel_mode,
         config.data.qc_only,
         config.data.cache_open_participants,
+        ppg_channels=config.data.ppg_channels,
     )
 
 
@@ -94,7 +95,12 @@ def main() -> int:
     )
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    participants = list(discover_participant_files(config.data.source_dir))
+    # The staged cache is self-describing.  Prefer it when the original large
+    # NPZ source has intentionally not been copied to a GPU scratch filesystem.
+    cache_participants = sorted(
+        path.name for path in Path(config.data.cache_dir).glob("P*") if (path / "complete.json").is_file()
+    )
+    participants = cache_participants or list(discover_participant_files(config.data.source_dir))
     folds = make_group_folds(participants, 4, config.train.seed)
     save_folds(folds, output / "folds.json")
     if args.fold_index is not None:

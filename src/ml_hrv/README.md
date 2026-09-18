@@ -5,7 +5,8 @@
 
 The primary contract is fixed:
 
-- input waveform: `ppg_rawslot_values`, one device, green + IR;
+- input waveform: `ppg_rawslot_values`, one device, configured as green-only
+  or green + IR (the frozen SegNet baseline used green + IR);
 - missingness/timing: `ppg_rawslot_mask` and relative timestamp jitter;
 - target order: `ecg_rmssd_corrected_ms`, then `ecg_sdnn_corrected_ms`;
 - main protocol: causal trailing 5 minutes, update every 30 seconds;
@@ -16,3 +17,9 @@ The primary contract is fixed:
 See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for architecture and
 experiment order, and [BASELINE_RESULTS.md](BASELINE_RESULTS.md) for the frozen
 four-fold result, acceleration benchmarks, and current go/no-go decisions.
+
+Teacher-comparable green-only causal-TCN configurations are
+`configs/teacher_green_earring_causal_tcn.json` (single-device model) and
+`configs/shared_green_causal_tcn.json` (same model, all devices as separate
+single-device samples).  Both use `consistency_weight=0`, so their difference
+isolates training-device scope rather than an added multi-view loss.

@@ -12,7 +12,7 @@ from .metrics import summarize_predictions
 
 
 TEXT_FIELDS = {
-    "fold", "participant", "device", "label_source", "beat_reject_reason",
+    "fold", "participant", "device", "ppg_channels", "label_source", "beat_reject_reason",
     "reject_reason", "prediction_source",
 }
 BOOL_FIELDS = {"accepted"}

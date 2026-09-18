@@ -52,6 +52,7 @@ def make_dataset(config: ExperimentConfig, participants, cached_stats: bool) -> 
         config.data.qc_only,
         config.data.cache_open_participants,
         use_precomputed_stats=cached_stats,
+        ppg_channels=config.data.ppg_channels,
     )
 
 

@@ -35,6 +35,7 @@ def main() -> int:
         config.data.cache_dir, fold.train, config.data.devices,
         config.data.segment_seconds, config.data.window_seconds,
         config.data.accel_mode, config.data.qc_only, config.data.cache_open_participants,
+        ppg_channels=config.data.ppg_channels,
     )
     results = []
     for threads, windows_per_batch in CANDIDATES:

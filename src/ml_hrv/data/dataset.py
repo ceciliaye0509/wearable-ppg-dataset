@@ -26,7 +26,7 @@ class SampleRef:
 
 
 class RawslotWindowDataset(Dataset):
-    """Returns a single device's green+IR values, masks, and jitter.
+    """Returns a single device's selected raw PPG channels, masks, and jitter.
 
     Input values are never interpolated.  ``values`` are copied verbatim from
     ``ppg_rawslot_values``; missing slots are represented separately by
@@ -44,11 +44,19 @@ class RawslotWindowDataset(Dataset):
         qc_only: bool = True,
         cache_open_participants: int = 4,
         use_precomputed_stats: bool = True,
+        ppg_channels: Iterable[str] = ("green", "ir"),
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.participants = tuple(participants)
         self.device_names = tuple(devices)
         self.device_indices = tuple(DEVICE_NAMES.index(x) for x in self.device_names)
+        self.channel_names = tuple(ppg_channels)
+        channel_lookup = {"green": 0, "ir": 1}
+        if not self.channel_names or any(channel not in channel_lookup for channel in self.channel_names):
+            raise ValueError("ppg_channels must be a non-empty ordered subset of ('green', 'ir')")
+        if len(set(self.channel_names)) != len(self.channel_names):
+            raise ValueError("ppg_channels must not contain duplicates")
+        self.channel_indices = tuple(channel_lookup[channel] for channel in self.channel_names)
         self.segment_seconds = segment_seconds
         self.trailing_seconds = trailing_seconds
         self.accel_mode = accel_mode
@@ -183,15 +191,23 @@ class RawslotWindowDataset(Dataset):
         ref = self.refs[index]
         values_all, mask_all, jitter_all, stats_all = self._open_arrays(ref.participant)
         start = values_all.shape[-1] - self.trailing_samples
-        raw = np.asarray(values_all[ref.window_index, ref.device_index, :, start:], dtype=np.float32)
-        mask = np.asarray(mask_all[ref.window_index, ref.device_index, :, start:], dtype=np.bool_)
-        jitter = np.asarray(jitter_all[ref.window_index, ref.device_index, :, start:], dtype=np.float32)
+        raw = np.asarray(
+            values_all[ref.window_index, ref.device_index, self.channel_indices, start:], dtype=np.float32
+        )
+        mask = np.asarray(
+            mask_all[ref.window_index, ref.device_index, self.channel_indices, start:], dtype=np.bool_
+        )
+        jitter = np.asarray(
+            jitter_all[ref.window_index, ref.device_index, self.channel_indices, start:], dtype=np.float32
+        )
         if stats_all is None:
             values = self._robust_normalize(raw, mask)
         else:
-            stats = np.asarray(stats_all[ref.window_index, ref.device_index], dtype=np.float32)
+            stats = np.asarray(
+                stats_all[ref.window_index, ref.device_index, self.channel_indices], dtype=np.float32
+            )
             values = self._robust_normalize_from_stats(raw, mask, stats)
-        shape = (2, self.n_segments, self.samples_per_segment)
+        shape = (len(self.channel_indices), self.n_segments, self.samples_per_segment)
         values = values.reshape(shape).transpose(1, 0, 2).copy()
         mask = mask.reshape(shape).transpose(1, 0, 2).copy()
         jitter = jitter.reshape(shape).transpose(1, 0, 2).copy()
@@ -234,6 +250,7 @@ class RawslotWindowDataset(Dataset):
             "window_index": ref.window_index,
             "window_start_ms": float(meta["ppg_window_t0_ms"][ref.window_index]),
             "device": DEVICE_NAMES[ref.device_index],
+            "ppg_channels": self.channel_names,
             "group_id": ref.group_id,
             "coverage": coverage,
             "label_source": label_source,
