@@ -16,7 +16,7 @@ Main findings:
 5. An external **BIDMC sanity check** confirms that the model detects true cardiac cycles but also decodes secondary PPG waveform maxima as extra events.
 6. Frozen PulsePPG + nested Ridge remains the strongest stable foundation-model baseline from last week. The main new opportunity is to combine the stronger temporal correlation of the peak-based method with better calibration.
 
-## 2. Last week's verified reference results（上周基线）
+## 2. Last week's verified reference results
 
 ### 2.1 Pooled held-out windows
 
