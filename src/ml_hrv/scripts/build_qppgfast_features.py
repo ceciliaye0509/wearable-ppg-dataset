@@ -16,7 +16,6 @@ from pathlib import Path
 import numpy as np
 
 from ml_hrv.config import ExperimentConfig
-from ml_hrv.data.splits import load_folds
 
 
 FROZEN_QPPGFAST = {
@@ -208,12 +207,13 @@ def main():
     config = ExperimentConfig.from_json(args.config)
     if tuple(config.data.devices) != ("Earring",) or tuple(config.data.ppg_channels) != ("green",):
         raise ValueError("This frozen adapter is limited to the Earring green comparison contract")
-    folds = {fold.name: fold for fold in load_folds(Path(args.run_dir) / "folds.json")}
+    raw_folds = json.loads((Path(args.run_dir) / "folds.json").read_text(encoding="utf-8"))
+    folds = {str(fold["name"]): fold for fold in raw_folds}
     fold = folds.get(args.fold_name)
     if fold is None:
         raise KeyError("No %s in %s/folds.json" % (args.fold_name, args.run_dir))
-    split_by_participant = {participant: "train" for participant in fold.train}
-    split_by_participant.update({participant: "val" for participant in fold.val})
+    split_by_participant = {str(participant): "train" for participant in fold["train"]}
+    split_by_participant.update({str(participant): "val" for participant in fold["val"]})
     hrv, qppgfast, bandpass_filter = _heuristic_modules()
     rows = []
     for path in _raw_paths(Path(config.data.source_dir), set(split_by_participant)):
@@ -231,7 +231,7 @@ def main():
     _write_csv(output / "qppgfast_features_train.csv", train)
     _write_csv(output / "qppgfast_features_val.csv", val)
     audit = {
-        "contract": {"name": "comparison_rawslot100_v1", **FROZEN_QPPGFAST}, "fold": fold.to_dict(),
+        "contract": {"name": "comparison_rawslot100_v1", **FROZEN_QPPGFAST}, "fold": fold,
         "all": _summary(rows), "train": _summary(train), "val": _summary(val),
         "source_dir": str(Path(config.data.source_dir)),
         "label_leakage": "none: output fields are computed from PPG, timestamps, and accelerometer metadata only",
