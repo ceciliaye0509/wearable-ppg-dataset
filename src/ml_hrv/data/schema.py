@@ -7,6 +7,7 @@ large raw-slot arrays without decompressing multiple gigabytes into RAM.
 from __future__ import annotations
 
 import re
+import sys
 import zipfile
 from pathlib import Path
 
@@ -39,6 +40,23 @@ REQUIRED_FIELDS = {
 
 FORBIDDEN_PRIMARY_FIELDS = {"ppg_resampled", "ppg_resampled_values"}
 _PID_RE = re.compile(r"_(P\d+)\.npz$")
+
+
+def load_rawslot_npz(path: str | Path):
+    """Open a release NPZ while bridging NumPy 2 pickle module names.
+
+    The public raw-slot release stores small object arrays (notably device and
+    channel labels) pickled by NumPy 2, which names its private core module
+    ``numpy._core``.  The frozen partner ``water-legacy`` environment uses a
+    compatible pre-2 NumPy build where the same implementation is exposed as
+    ``numpy.core``.  Registering these aliases is process-local: it neither
+    changes the environment nor alters numerical arrays or labels.
+    """
+    if not hasattr(np, "_core"):
+        legacy_core = np.core
+        sys.modules.setdefault("numpy._core", legacy_core)
+        sys.modules.setdefault("numpy._core.multiarray", legacy_core.multiarray)
+    return np.load(path, allow_pickle=True)
 
 
 def discover_participant_files(data_dir: str | Path) -> dict[str, Path]:
@@ -88,7 +106,7 @@ def validate_npz_schema(path: str | Path) -> dict[str, object]:
         if headers[field][0] != (n_windows,):
             raise ValueError(f"{path.name}: {field} must have one value per window")
 
-    with np.load(path, allow_pickle=True) as data:
+    with load_rawslot_npz(path) as data:
         fs = float(data["target_fs"])
         seconds = int(data["window_sec"])
         participant = str(data["participant"])

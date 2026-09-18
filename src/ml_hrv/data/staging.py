@@ -9,7 +9,7 @@ import warnings
 
 import numpy as np
 
-from .schema import discover_participant_files, validate_npz_schema
+from .schema import discover_participant_files, load_rawslot_npz, validate_npz_schema
 
 
 ROBUST_STATS_VERSION = 1
@@ -100,7 +100,7 @@ def stage_participant(source: str | Path, cache_dir: str | Path, overwrite: bool
         return json.loads(completion.read_text(encoding="utf-8"))
     output.mkdir(parents=True, exist_ok=True)
 
-    with np.load(source, allow_pickle=True) as data:
+    with load_rawslot_npz(source) as data:
         values = np.asarray(data["ppg_rawslot_values"], dtype=np.float32)
         _write_array(output / "values.npy", values)
         del values
