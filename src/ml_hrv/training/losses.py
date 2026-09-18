@@ -120,7 +120,15 @@ class PipelineLoss:
             target_ms = batch["target_ms"]
             assert isinstance(target_ms, torch.Tensor)
             target = self.scaler.encode(target_ms)
-            direct = heteroscedastic_loss(outputs["direct_loc"], outputs["direct_logvar"], target)
+            if self.config.train.direct_loss == "huber":
+                # Development-only collapse repair: remove the learned
+                # variance escape hatch while retaining the same log-target
+                # scaling and direct location head.
+                direct = F.huber_loss(
+                    outputs["direct_loc"], target, delta=self.config.train.huber_delta
+                )
+            else:
+                direct = heteroscedastic_loss(outputs["direct_loc"], outputs["direct_logvar"], target)
             consistency = multiview_consistency_loss(outputs["direct_loc"], batch["group_id"])
             total = direct + self.config.train.consistency_weight * consistency
         losses: dict[str, torch.Tensor] = {"direct": direct, "consistency": consistency}

@@ -47,6 +47,8 @@ class TrainConfig:
     patience: int = 10
     learning_rate: float = 3e-4
     weight_decay: float = 1e-4
+    direct_loss: str = "heteroscedastic_nll"  # heteroscedastic_nll | huber
+    huber_delta: float = 1.0  # standardized log-HRV units; used only by huber.
     windows_per_batch: int = 4
     batches_per_epoch: int = 256
     num_workers: int = 0
@@ -105,6 +107,10 @@ class ExperimentConfig:
             raise ValueError("ppg_channels must not contain duplicates")
         if self.train.stage not in {"direct", "beat_pretrain", "beat", "joint"}:
             raise ValueError("stage must be direct, beat_pretrain, beat, or joint")
+        if self.train.direct_loss not in {"heteroscedastic_nll", "huber"}:
+            raise ValueError("direct_loss must be heteroscedastic_nll or huber")
+        if self.train.huber_delta <= 0:
+            raise ValueError("huber_delta must be positive")
         if self.train.num_workers == 0 and self.train.persistent_workers:
             raise ValueError("persistent_workers requires num_workers > 0")
         if self.model.fusion_enabled and self.train.stage != "joint":
