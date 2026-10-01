@@ -236,17 +236,55 @@ Every fold selected threshold `0.60`, and validation peak-count ratios ranged on
 
 Because Kazemi uses grouped 4-fold and the foundation models use LOSO, this table is contextual rather than a strict controlled ranking. Nevertheless, Kazemi + decoder score is the strongest current SDNN result across all three reported metrics. It does not improve RMSSD.
 
-## 10. Next steps
+## 10. BIDMC/ICU in-domain experiment
 
-1. Add strict and delay-aligned event metrics to all peak-model reports.
-2. Develop an IBI-sensitive validation objective for RMSSD; the count-based decoder score solves SDNN but not adjacent-interval accuracy.
-3. Match qppg, Own PeakNet, Kazemi, PulsePPG, and PaPaGei on identical held-out windows and report native/common coverage.
-4. Run the proposed hybrid baseline:
+### 10.1 Final results
 
-   `qppg HRV + quality features + frozen embedding → nested Ridge residual correction`
+| Aggregation | Target | MAE | R² | Pearson r |
+|---|---|---:|---:|---:|
+| Pooled 371 windows | **SDNN** | **7.506 ms** | **0.535** | **0.760** |
+| Pooled 371 windows | **RMSSD** | **12.272 ms** | **0.380** | **0.686** |
+| Fold mean ± std | SDNN | 7.519 ± 1.991 ms | 0.457 ± 0.255 | 0.755 ± 0.108 |
+| Fold mean ± std | RMSSD | 12.283 ± 1.021 ms | 0.339 ± 0.223 | 0.669 ± 0.117 |
 
-5. Extend the frozen-embedding Ridge alpha grid beyond `1000` and check whether selection remains boundary-limited.
+All 53 BIDMC records were held out exactly once across four folds. The evaluation contained 371 unique 5-minute windows with no duplicated record/window pairs.
 
-## 11. Meeting take-away
+The pooled peak-detection performance was **precision = 0.888, recall = 0.856, and F1 = 0.872**, with a mean RR correction ratio of **0.054**.
 
-> This week established that cross-participant event decoding and calibration—not complete failure to learn cardiac morphology—was the main limitation of our peak models. Validation decoder-score selection transforms Kazemi PeakNet into the strongest current learned SDNN estimator, reducing pooled MAE by 62.1% to 10.56 ms and increasing pooled r to 0.767. However, RMSSD remains poor because correct total peak count does not guarantee accurate adjacent IBIs. The next priority is therefore an IBI-sensitive objective and a leakage-safe hybrid combining heuristic HRV with learned residual correction.
+### 10.2 Per-fold results
+
+| Fold | Test records | Windows | Threshold | Peak F1 | SDNN MAE / R² / r | RMSSD MAE / R² / r |
+|---:|---:|---:|---:|---:|---|---|
+| 0 | 14 | 98 | 0.50 | 0.870 | 6.833 / 0.220 / 0.617 | 11.720 / 0.081 / 0.532 |
+| 1 | 13 | 91 | 0.60 | 0.901 | 10.264 / 0.569 / 0.765 | 13.779 / 0.229 / 0.612 |
+| 2 | 13 | 91 | 0.25 | 0.789 | 7.430 / 0.275 / 0.759 | 12.077 / 0.483 / 0.773 |
+| 3 | 13 | 91 | 0.65 | 0.925 | 5.548 / 0.763 / 0.880 | 11.555 / 0.563 / 0.761 |
+
+### 10.3 Comparison with our wearable dataset
+
+| Dataset | Windows | SDNN MAE / R² / r | RMSSD MAE / R² / r |
+|---|---:|---|---|
+| Our wearable dataset | 11,788 | 10.560 / 0.262 / 0.767 | 17.316 / −1.821 / 0.385 |
+| BIDMC/ICU | 371 | **7.506 / 0.535 / 0.760** | **12.272 / 0.380 / 0.686** |
+
+BIDMC reduces SDNN MAE by **28.9%** and RMSSD MAE by **29.1%** relative to the wearable result. The strongest improvement is in RMSSD, whose R² increases from **−1.821 to 0.380**.
+
+This is a diagnostic comparison rather than a strictly controlled benchmark because the two models were trained on different datasets.
+
+### 10.4 Training differences
+
+| Setting | Our wearable experiment | BIDMC/ICU experiment |
+|---|---|---|
+| Training/evaluation | Wearable → wearable | BIDMC → BIDMC |
+| Split | Participant-grouped 4-fold | Record-grouped 4-fold, seed 42 |
+| Input | Earring Green PPG | BIDMC PLETH |
+| Original sampling rate | 100 Hz | 125 Hz |
+| Model sampling rate | 50 Hz | 50 Hz |
+| Training segment | 5-minute windows | **30-second segments** |
+| HRV evaluation | 5 min, 30-s stride | 5 min, 30-s stride |
+| Batch size | 8 | 16 |
+| Peak labels | ECG-derived | ECG R-peak-aligned PPG pulse targets |
+| Model | our PeakNet | our PeakNet |
+| Selection | Validation decoder score | Validation decoder score |
+
+The BIDMC model was trained on BIDMC training records and tested on unseen BIDMC records; therefore, this is an **in-domain grouped cross-validation experiment**, not zero-shot evaluation. The better BIDMC performance suggests that the pipeline works well on stable PPG, while motion and contact variability remain major limitations in the wearable dataset.
