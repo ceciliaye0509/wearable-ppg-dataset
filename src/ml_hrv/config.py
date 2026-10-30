@@ -41,6 +41,10 @@ class ModelConfig:
     delay_max_ms: float = 700.0
     fusion_enabled: bool = False
     qppg_residual_enabled: bool = False
+    # RMSSD-only development ablation: use a train-fitted qPPG calibration,
+    # retain its median fallback for invalid windows, and let the neural branch
+    # make only a bounded correction on valid windows.
+    qppg_rmssd_calibration_enabled: bool = False
 
 
 @dataclass
@@ -53,6 +57,9 @@ class TrainConfig:
     weight_decay: float = 1e-4
     direct_loss: str = "heteroscedastic_nll"  # heteroscedastic_nll | huber
     huber_delta: float = 1.0  # standardized log-HRV units; used only by huber.
+    # Targets are RMSSD, SDNN in that order.  The RMSSD residual ablation uses
+    # (1, 0), so SDNN cannot steer a shared direct head.
+    direct_target_weights: tuple[float, float] = (1.0, 1.0)
     windows_per_batch: int = 4
     batches_per_epoch: int = 256
     num_workers: int = 0
@@ -115,6 +122,10 @@ class ExperimentConfig:
             raise ValueError("direct_loss must be heteroscedastic_nll or huber")
         if self.train.huber_delta <= 0:
             raise ValueError("huber_delta must be positive")
+        if len(self.train.direct_target_weights) != 2 or not any(
+            float(weight) > 0.0 for weight in self.train.direct_target_weights
+        ) or any(float(weight) < 0.0 for weight in self.train.direct_target_weights):
+            raise ValueError("direct_target_weights must contain two non-negative values with one positive")
         if self.train.num_workers == 0 and self.train.persistent_workers:
             raise ValueError("persistent_workers requires num_workers > 0")
         if self.model.fusion_enabled and self.train.stage != "joint":
@@ -128,3 +139,8 @@ class ExperimentConfig:
                 raise ValueError("qPPG residual ablation is direct-only")
             if not self.data.qppg_feature_csv:
                 raise ValueError("qPPG residual ablation requires data.qppg_feature_csv")
+        if self.model.qppg_rmssd_calibration_enabled:
+            if not self.model.qppg_residual_enabled:
+                raise ValueError("RMSSD qPPG calibration requires qPPG residual mode")
+            if tuple(float(weight) for weight in self.train.direct_target_weights) != (1.0, 0.0):
+                raise ValueError("RMSSD qPPG calibration requires direct_target_weights=[1.0, 0.0]")

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>ECG Amplitude Gate Review</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/direction_truth.css"><link rel="stylesheet" href="/gate_review.css"><script src="/gate_review.js" defer></script></head>
+<body><main class="shell">
+<header><div><p class="eyebrow">SEPARATE INTERVAL FOLLOW-UP</p><h1>Review amplitude-gated ECG intervals</h1></div><nav><span id="reviewer"></span><a class="button" href="/?set=difficult">Difficult direction audit · 12</a><a class="button" href="/">Main direction review</a><a class="button" href="/gate-api/export.csv">Export interval labels</a></nav></header>
+<p class="intro">Nine minutes you could read were blocked by the whole-minute amplitude rule. Review the original signal in 5-second intervals, then label the direction of the readable portions. Your completed 160 minute labels stay unchanged.</p>
+<section class="reference-note"><strong>Amplitude alone does not establish readability.</strong><p>A span above 5,000 µV is shown as a diagnostic. Decide whether QRS deflections are readable yourself. Candidate directions and earlier direction labels are hidden. The full-minute and detail plots use their own vertical scales. This is a targeted development review, scored separately from the random evaluation.</p></section>
+<p id="startup-error" class="error" role="alert" hidden></p>
+<div class="layout"><aside><h2>Review minutes</h2><p id="overall" class="muted"></p><div id="minutes"></div></aside>
+<section class="workspace"><div id="empty"><h2>Select a minute</h2><p>Label all twelve intervals as Readable, Unreadable or Unsure. No answer is preselected.</p></div>
+<div id="panel" hidden><h2 id="task-title"></h2><p id="source-label" class="muted"></p><p id="amplitude-note" class="amplitude-note"></p>
+<article class="plot-card"><strong>Original ECG · full minute</strong><canvas id="overview" aria-label="Original unflipped full-minute ECG"></canvas></article>
+<div id="tiles" class="interval-grid" aria-label="Twelve 5-second intervals"></div>
+<article class="plot-card"><div class="plot-controls"><strong id="detail-label"></strong><div><button id="previous">← Previous interval</button><button id="next">Next interval →</button></div></div><canvas id="detail-plot" aria-label="Original unflipped ECG for the selected 5-second interval"></canvas><p id="tile-amplitude" class="muted"></p>
+<div class="readability-controls"><span>Selected interval:</span><button id="readable">Readable</button><button id="unreadable">Unreadable</button><button id="unsure">Unsure</button><button id="clear-tile">Clear this interval label</button></div></article>
+<p id="interval-progress" class="muted"></p>
+<fieldset id="directions"><legend>Direction of the readable portions — choose one</legend>
+<label><input type="radio" name="direction" value="positive"><span><strong>Positive</strong>Predominantly upward QRS</span></label>
+<label><input type="radio" name="direction" value="negative"><span><strong>Negative</strong>Predominantly downward QRS</span></label>
+<label><input type="radio" name="direction" value="balanced"><span><strong>Balanced / equiphasic</strong>Nearly equal positive and negative QRS components</span></label>
+<label><input type="radio" name="direction" value="mixed"><span><strong>Mixed directions</strong>Readable portions have clearly different directions</span></label>
+<label><input type="radio" name="direction" value="unreadable"><span><strong>No readable intervals</strong>None of the intervals allows a reliable direction judgment</span></label>
+<label><input type="radio" name="direction" value="unsure"><span><strong>Unsure</strong>The direction still needs another review</span></label>
+</fieldset>
+<div class="notes-row"><label>Confidence<select id="confidence"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></label><label class="notes">Notes (optional)<textarea id="notes" rows="2" maxlength="2000" placeholder="Mention any brief artifact or uncertain QRS morphology."></textarea></label></div>
+<div class="save-row"><span id="message" role="status"></span><div><button id="restore">Restore saved interval labels</button><button id="save">Save as in progress</button><button id="complete" class="primary">Complete interval review →</button></div></div>
+</div></section></div>
+<footer>This review has a separate database and revision history. Main direction labels, R-peak marks, raw ECG and production flip rules are preserved.</footer>
+</main><dialog id="login"><form id="login-form"><h2>Sign in</h2><label>Reviewer name<input id="name" maxlength="64" autocomplete="name" required></label><label>Access code<input id="code" type="password" autocomplete="current-password" required></label><p id="login-error" class="error" role="alert"></p><button type="submit" class="primary">Start interval review</button></form></dialog></body></html>

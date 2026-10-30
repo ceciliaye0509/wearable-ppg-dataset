@@ -48,3 +48,13 @@ src/model_baselines/supervised/.ipynb_checkpoints/
 
 # Accidental command-output file
 /-o
+
+# Machine-local migration data, environments, and experiment outputs
+/data/
+/runs/
+/local/
+/.venv-*/
+*.bundle
+.env
+.env.*
+!.env.example

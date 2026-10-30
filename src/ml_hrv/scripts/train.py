@@ -31,7 +31,10 @@ def seed_everything(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
-def make_dataset(config: ExperimentConfig, participants, trailing_seconds: int | None = None):
+def make_dataset(
+    config: ExperimentConfig, participants, trailing_seconds: int | None = None,
+    qppg_feature_scaler=None, qppg_rmssd_calibrator=None,
+):
     return RawslotWindowDataset(
         config.data.cache_dir,
         participants,
@@ -43,6 +46,8 @@ def make_dataset(config: ExperimentConfig, participants, trailing_seconds: int |
         config.data.cache_open_participants,
         ppg_channels=config.data.ppg_channels,
         qppg_feature_csv=config.data.qppg_feature_csv if config.model.qppg_residual_enabled else None,
+        qppg_feature_scaler=qppg_feature_scaler,
+        qppg_rmssd_calibrator=qppg_rmssd_calibrator,
     )
 
 
@@ -115,10 +120,18 @@ def main() -> int:
         val_data = make_dataset(config, fold.val, trailing)
         test_data = make_dataset(config, fold.test, trailing) if evaluate_outer_test else None
         qppg_feature_scaler = train_data.fit_qppg_feature_scaler()
+        qppg_rmssd_calibrator = (
+            train_data.fit_qppg_rmssd_calibrator()
+            if config.model.qppg_rmssd_calibration_enabled else None
+        )
         if qppg_feature_scaler is not None:
             val_data.set_qppg_feature_scaler(qppg_feature_scaler)
             if test_data is not None:
                 test_data.set_qppg_feature_scaler(qppg_feature_scaler)
+        if qppg_rmssd_calibrator is not None:
+            val_data.set_qppg_rmssd_calibrator(qppg_rmssd_calibrator)
+            if test_data is not None:
+                test_data.set_qppg_rmssd_calibrator(qppg_rmssd_calibrator)
         scaler = TargetScaler.fit(train_data.target_array())
         train_sampler = ParticipantDeviceBatchSampler(
             train_data.sample_refs,
@@ -166,6 +179,9 @@ def main() -> int:
         trainer = Trainer(
             model, config, scaler, device,
             qppg_feature_scaler_state=qppg_feature_scaler.state_dict() if qppg_feature_scaler else None,
+            qppg_rmssd_calibrator_state=(
+                qppg_rmssd_calibrator.state_dict() if qppg_rmssd_calibrator else None
+            ),
         )
         checkpoint_path = trainer.fit(train_loader, validation_loader, fold, output)
         checkpoint = load_checkpoint(checkpoint_path, device)
@@ -181,6 +197,10 @@ def main() -> int:
             fold.name,
             beat_trained=config.train.stage in {"beat", "joint"},
             max_batches=config.train.max_test_batches,
+            qppg_rmssd_residual_cap_normalized=(
+                qppg_rmssd_calibrator.residual_cap_log / float(scaler.std[0])
+                if qppg_rmssd_calibrator is not None else None
+            ),
         )
         run_metadata = {
             "config": config.to_dict(),

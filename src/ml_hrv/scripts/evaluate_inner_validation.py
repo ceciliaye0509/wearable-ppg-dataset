@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 
 from ml_hrv.config import DataConfig, EvaluationConfig, ExperimentConfig, ModelConfig, TrainConfig
 from ml_hrv.data.dataset import RawslotWindowDataset, collate_rawslot
-from ml_hrv.data.qppg import QPPGFeatureScaler
+from ml_hrv.data.qppg import QPPGFeatureScaler, QPPGRMSSDCalibrator
 from ml_hrv.data.splits import Fold, load_folds
 from ml_hrv.evaluation.evaluator import evaluate_model
 from ml_hrv.evaluation.metrics import regression_metrics
@@ -29,13 +29,14 @@ def _config(raw):
     )
 
 
-def _dataset(config, participants, qppg_feature_scaler=None):
+def _dataset(config, participants, qppg_feature_scaler=None, qppg_rmssd_calibrator=None):
     return RawslotWindowDataset(
         config.data.cache_dir, participants, config.data.devices, config.data.segment_seconds,
         config.data.window_seconds, config.data.accel_mode, config.data.qc_only,
         config.data.cache_open_participants, ppg_channels=config.data.ppg_channels,
         qppg_feature_csv=config.data.qppg_feature_csv if config.model.qppg_residual_enabled else None,
         qppg_feature_scaler=qppg_feature_scaler,
+        qppg_rmssd_calibrator=qppg_rmssd_calibrator,
     )
 
 
@@ -62,6 +63,7 @@ def main():
         raise RuntimeError("checkpoint split differs from run-dir folds.json")
     train_data = _dataset(config, saved_fold.train)
     qppg_scaler = None
+    qppg_rmssd_calibrator = None
     if config.model.qppg_residual_enabled:
         saved_qppg = payload.get("qppg_feature_scaler")
         if not isinstance(saved_qppg, dict):
@@ -74,7 +76,17 @@ def main():
         ):
             raise RuntimeError("checkpoint qPPG scaler is not train-only")
         train_data.set_qppg_feature_scaler(qppg_scaler)
-    val_data = _dataset(config, saved_fold.val, qppg_scaler)
+    if config.model.qppg_rmssd_calibration_enabled:
+        saved_calibrator = payload.get("qppg_rmssd_calibrator")
+        if not isinstance(saved_calibrator, dict):
+            raise RuntimeError("RMSSD qPPG checkpoint has no train-only calibrator")
+        qppg_rmssd_calibrator = QPPGRMSSDCalibrator.from_state_dict(saved_calibrator)
+        recomputed_calibrator = train_data.fit_qppg_rmssd_calibrator()
+        for field in ("slope", "intercept", "target_median_ms", "residual_cap_log"):
+            if not np.isclose(getattr(qppg_rmssd_calibrator, field), getattr(recomputed_calibrator, field)):
+                raise RuntimeError("checkpoint RMSSD qPPG calibrator is not train-only")
+        train_data.set_qppg_rmssd_calibrator(qppg_rmssd_calibrator)
+    val_data = _dataset(config, saved_fold.val, qppg_scaler, qppg_rmssd_calibrator)
     scaler = TargetScaler.from_state_dict(payload["target_scaler"])
     recomputed = TargetScaler.fit(train_data.target_array())
     if not (np.allclose(scaler.mean, recomputed.mean) and np.allclose(scaler.std, recomputed.std)):
@@ -85,7 +97,14 @@ def main():
     loader = DataLoader(val_data, batch_size=config.train.windows_per_batch * 3, shuffle=False, num_workers=0, collate_fn=collate_rawslot)
     model = RawContinuousHRVModel(config).to(device)
     model.load_state_dict(payload["model_state_dict"])
-    rows = evaluate_model(model, loader, scaler, config, device, saved_fold.name, beat_trained=False)
+    residual_cap_normalized = (
+        qppg_rmssd_calibrator.residual_cap_log / float(scaler.std[0])
+        if qppg_rmssd_calibrator is not None else None
+    )
+    rows = evaluate_model(
+        model, loader, scaler, config, device, saved_fold.name, beat_trained=False,
+        qppg_rmssd_residual_cap_normalized=residual_cap_normalized,
+    )
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     with (output / "window_predictions.csv").open("w", newline="", encoding="utf-8") as handle:
@@ -106,6 +125,7 @@ def main():
         "best_validation_loss": float(payload["best_validation_loss"]), "fold": saved_fold.to_dict(),
         "n_validation_rows": len(rows), "train_only_scaler_match": True, "metrics": metrics,
         "qppg_train_only_scaler_match": bool(config.model.qppg_residual_enabled),
+        "qppg_rmssd_calibration_train_only_match": bool(qppg_rmssd_calibrator is not None),
     }
     (output / "inner_validation_metrics.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))

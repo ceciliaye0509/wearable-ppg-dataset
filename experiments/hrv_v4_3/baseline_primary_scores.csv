@@ -1,0 +1,3 @@
+dataset_version,scope,baseline_method,channels,coverage_pct,RMSSD_MAE_ms,RMSSD_r,SDNN_MAE_ms,SDNN_r,n_total_per_channel,coverage_denominator
+v4.3,all__all_candidates_v4_3_GT,qppgfast_devicewise_corr,6,59.098033627814196,41.43234199401589,0.26386398418698914,45.0704827812302,0.4596931452870516,14036,all_PPG_candidate_windows
+v4.3,all__eligible_v4_3_GT,qppgfast_devicewise_corr,6,80.76136695550579,41.43234199401589,0.26386398418698914,45.0704827812302,0.4596931452870516,10271,eligible_ECG_reference_windows

@@ -2,10 +2,17 @@
 
 本文说明当前顶层文件用途，以及哪些内容已经移入 `archive/`。
 
+**2026-10-30当前研究入口：** 见
+[v4.3状态与迁移说明](../../docs/hrv/WINDOWS_MODEL_HANDOFF.md)。下表保留各历史
+脚本的用途；它们的默认输入、v1极性规则和旧报告不能替代已冻结的v4.3数据。
+新heuristic实验应绑定v4.3并写独立输出目录，当前冻结成绩见
+`experiments/hrv_v4_3/baseline_primary_scores.csv`（仓库根目录下）。
+
 ## 当前主线
 
 | 文件/目录 | 作用 |
 |---|---|
+| `correct_ecg_polarity.py` | 扫描所有本地 Polar ECG raw 文件，按严重伪迹门槛、60 秒块内 QRS 极性投票和持续性条件生成原始数据不覆盖的纠正清单；后续 ECG 算法需通过 `load_corrected_ecg()` 读取统一纠正视图。 |
 | `evaluate_rawslots_baseline_ablation.py` | 从 `synced_3device_rawaligned_training_v1_stride30_rawslots` 全量重跑 rawslot/resampled、peak/foot、IBI correction、QC/no-QC 消融，并冻结 device x channel 结果。 |
 | `evaluate_rawslots_detector_fiducials.py` | detector-native peak vs foot/onset 轻量验证脚本；默认每个 participant 抽样 5 个窗口、单进程、只跑 `scipy,qppgfast`，避免 16GB 机器误触发全量重任务。PWD/MSPTD/qppgfast 在 5 分钟窗口上计算较重，目前不作为 frozen baseline 输出。 |
 | `qppgfast_devicewise_v1.py` | rawslots 正式、不可调的 qppgfast baseline 入口：strict interpolation 100 Hz/gap 100 ms、`0.7-3.5 Hz`、IBI correction `0.20`、Earring peak + Ring/Watch native foot/onset；同时产出同输入 SciPy-peak 对照。按 participant 流式处理，适合 16GB 机器跑全量。 |
@@ -42,6 +49,7 @@
 
 | 目录 | 作用 |
 |---|---|
+| `outputs/ecg_polarity_correction_v1/` | Polar ECG 逐时间段的极性判定、纠正映射、块级诊断和纠正前后抽样图；源 ECG NPZ 保持不变。 |
 | `outputs/rawslots_baseline_ablation_v1/` | 最新 rawslots 全量消融和冻结报告。 |
 | `outputs/rawslots_qppgfast_devicewise_v1_full16/` | `qppgfast_devicewise_v1` 的全 16 人端到端复现、冻结配置、逐窗口明细和 SciPy-peak 验收对照。 |
 | `outputs/rawslots_qppgfast_waveform_consensus_freeze_v1/` | waveform-only 极性一致性规则的已冻结敏感性结果；独立 holdout coverage/R 未达预定义要求，因此不替代正式的 `peak_train` 极性规则。 |

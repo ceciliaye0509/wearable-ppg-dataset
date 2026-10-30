@@ -1,0 +1,142 @@
+{
+  "plan_id": "colleague_matched_group4_M1_v4_3_workstation_20261030",
+  "status": "migration_prepared_M1_runner_adaptations_required",
+  "primary": "colleague_Kazemi_PeakNet_on_updated_ECG_reference",
+  "primary_reason": "Match colleague input, folds, architecture, budget and validation decoder; first isolate ECG-reference/data-selection effects.",
+  "dataset": {
+    "dataset_version": "v4.3",
+    "dataset_name": "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029",
+    "dataset_dir": "<DATA_DIR supplied on the target machine>",
+    "protocol_sha256": "d39ea6d77a4f753824948ab25b77e08ab62c457a5cc8e1b67dfcb9b341ee95b8",
+    "candidate_windows": 14036,
+    "valid_ecg_label_windows": 10271,
+    "invalid_ecg_label_windows": 3765,
+    "training_mask": "ecg_label_qc_pass & isfinite(ecg_rmssd_corrected_ms) & isfinite(ecg_sdnn_corrected_ms)",
+    "manifest_file": "experiments/hrv_v4_3/dataset_manifest.json",
+    "HF_uploaded": false
+  },
+  "cli_args": {
+    "task": "peak",
+    "device_name": "earring",
+    "peak_channels": "green",
+    "peak_backbone": "kazemi",
+    "ibi_method": "median",
+    "batch_size": 8,
+    "n_epoch": 20,
+    "patience": 5,
+    "lr": 0.0001,
+    "src_hz": 100.0,
+    "resample_hz": 50.0,
+    "use_deriv": 1,
+    "limit": 0,
+    "min_rr_ms": 300.0,
+    "max_rr_ms": 2000.0,
+    "ibi_deviation_threshold": 0.2,
+    "ibi_reject_ratio": 0.5,
+    "data_dir": "<DATA_DIR supplied on the target machine>"
+  },
+  "environment": {
+    "PEAK_TARGET_MODE": "kazemi",
+    "PEAK_MIN_DISTANCE_MS": "300",
+    "PEAK_PROMINENCE": "0.0",
+    "PEAK_HARD_NEG_WEIGHT": "0.0",
+    "PEAK_COUNT_PENALTY": "0.5",
+    "PEAK_CORRECTION_PENALTY": "0.25",
+    "PEAK_MIN_PPG_VALID_RATIO": "0.95",
+    "PEAK_BANDPASS_LOW_HZ": "0.5",
+    "PEAK_BANDPASS_HIGH_HZ": "8.0"
+  },
+  "unset_environment": [
+    "PEAK_FIXED_THRESHOLD"
+  ],
+  "initial_global_seed": 40,
+  "experiment_seed_index": 0,
+  "actual_group_training_seed": 1,
+  "target_order_in_colleague_code": [
+    "sdnn_ms",
+    "rmssd_ms"
+  ],
+  "target_order_in_ml_hrv_history": [
+    "rmssd_ms",
+    "sdnn_ms"
+  ],
+  "target_order_must_be_named_not_positional": true,
+  "threshold_candidates": [
+    0.1,
+    0.15,
+    0.2,
+    0.25,
+    0.3,
+    0.35,
+    0.4,
+    0.45,
+    0.5,
+    0.55,
+    0.6,
+    0.65,
+    0.7,
+    0.75,
+    0.8
+  ],
+  "decoder_selection": "validation participants only; select checkpoint and threshold with F1 - 0.5*abs(count_ratio-1) - 0.25*RR_correction_ratio",
+  "event_matching_tolerance_ms": 100.0,
+  "threshold_060_is_historical_result_not_fixed_for_new_training": true,
+  "preprocessing": [
+    "ppg_resampled_values, Earring green",
+    "linear fill nonfinite",
+    "4th-order zero-phase Butterworth 0.5-8Hz at 100Hz",
+    "polyphase downsample to 50Hz",
+    "per-window/channel z normalization",
+    "append derivative (current local parser default=1)"
+  ],
+  "folds_file": "experiments/hrv_v4_3/folds.json",
+  "source_window_selection_file": "experiments/hrv_v4_3/source_window_selection.json",
+  "exclusions": {
+    "P5": "absent from current frozen dataset",
+    "P6": "zero valid ECG references; original exclusion remains closed"
+  },
+  "no_reassignment_of_remaining_participants": true,
+  "original_snapshot_provenance": "Local group4 source matches documented folds/decoder and named entrypoint; Anvil executed-source SHA/environment not supplied, so bit-identical historical reproduction is not claimed.",
+  "local_defaults_not_explicitly_confirmed_by_doc": [
+    "use_deriv=1",
+    "PPG valid ratio >=0.95",
+    "bandpass 0.5-8Hz",
+    "RR rejection ratio=0.50",
+    "event tolerance=100ms"
+  ],
+  "required_runner_adaptations_before_training": [
+    "Load frozen colleague folds intersected only with eligible PIDs; existing _group4_split insists on all16.",
+    "Export original source_window_index and start/end times; existing predictions.csv window_index enumerates FILTERED rows.",
+    "Keep all planned candidate rows and explicit reject reasons for denominator audit, including QC and PPG prefilters.",
+    "Bind selected source indices to dataset/protocol hash; re-evaluate selection if ECG labels change.",
+    "Train from scratch with actual seed1; do not load the old SegNet target scalers or its different folds."
+  ],
+  "evaluation": {
+    "report": [
+      "RMSSD/SDNN MAE, Pearson r, R2",
+      "event precision/recall/F1",
+      "pooled and participant-macro summaries",
+      "coverage/all14036 candidates",
+      "coverage/10271 ECG-eligible",
+      "coverage/model-input-eligible",
+      "same-window comparisons"
+    ],
+    "label_effect": "Rescore IDENTICAL available old predictions on common source windows with old/new references; do not mix with retraining effect.",
+    "retrain_effect": "Same cohort, inputs, folds, budget and decoder protocol; report paired old/new GT runs separately.",
+    "historical_11788_vs_current_selection": "Cannot attribute aggregate metric changes solely to GT when cohort/selection differs."
+  },
+  "secondary_plans": {
+    "controlled_model_alternative": "After Kazemi baseline, change one model component while retaining same inputs, folds, budget and validation/test duties.",
+    "legacy_SegNet": "Historical/secondary comparison only; previous 3device green+IR 100Hz config is not the primary colleague match."
+  },
+  "existing_rawslot_cache": {
+    "role": "Historical v4.1 caches are not transferable training caches; rebuild inputs and labels using final v4.3 and the colleague50Hz recipe.",
+    "new_cache_required": true,
+    "cache_dir_recommendation": "runs/cache_v4_3_colleague50hz",
+    "reuse_target_scalers": false
+  },
+  "training_started": false,
+  "created_utc": "2026-10-30",
+  "config_is_runner_input": false,
+  "scope": "Frozen comparison specification for M1 implementation; the legacy runner does not consume this JSON directly."
+}

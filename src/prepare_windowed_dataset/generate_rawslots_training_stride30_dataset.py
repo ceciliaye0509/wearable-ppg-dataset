@@ -314,7 +314,11 @@ def generate_participant(
 
     boundary_keep_arr = np.asarray(boundary_keep, dtype=bool)
     ecg_keep_arr = np.asarray(ecg_keep_pre, dtype=bool)
-    prelim_idx = np.where(boundary_keep_arr & ecg_keep_arr)[0]
+    # Window membership is decided by shared PPG/ECG time coverage and the PPG
+    # quality checks below.  The legacy Pan--Tompkins result is retained only as
+    # a diagnostic; it must not decide which windows are available to the new
+    # ECG ground-truth reconstruction.
+    prelim_idx = np.where(boundary_keep_arr)[0]
     if prelim_idx.size == 0:
         summary = {
             "participant": pid,
@@ -324,7 +328,7 @@ def generate_participant(
             "n_ecg_label_pass": int(ecg_keep_arr.sum()),
             "n_kept": 0,
             **overlap_info,
-            "skip_reason": "no_window_after_boundary_and_ecg_qc",
+            "skip_reason": "no_window_after_boundary_qc",
         }
         pd.DataFrame([summary]).to_csv(out_dir / f"{dataset_name}_{pid}_summary.csv", index=False)
         return None
@@ -344,7 +348,7 @@ def generate_participant(
     accel_gravity_reference = {dev: _accel_gravity_reference(ppg_raw[dev]) for dev in devices}
 
     final_keep = np.ones(n_pre, dtype=bool)
-    print(f"[{pid}] building rawslots/resampled PPG for {n_pre} ECG-valid windows")
+    print(f"[{pid}] building rawslots/resampled PPG for {n_pre} boundary-aligned windows")
     for out_i, wi in enumerate(prelim_idx):
         t0 = float(t0_all[wi])
         t1 = float(t1_all[wi])
@@ -420,6 +424,7 @@ def generate_participant(
         "max_source_gap_ms": max_source_gap_ms,
         "rawslot_tolerance_ms": rawslot_tolerance_ms,
         "ecg_detector": "window_neurokit2_pantompkins1985",
+        "legacy_ecg_qc_role": "diagnostic_only_not_an_inclusion_gate",
         "ecg_fs_inferred_hz": ecg_fs,
         "ecg_min_valid_ibi_ratio": ecg_min_valid_ibi_ratio,
         "min_ecg_valid_sample_ratio": min_ecg_valid_sample_ratio,
@@ -502,8 +507,8 @@ def generate_participant(
 def main() -> None:
     ap = argparse.ArgumentParser(description="Generate rawslots training_stride30 dataset.")
     ap.add_argument("--participants", default=None)
-    ap.add_argument("--exclude", default="P2,P14,P16,P17")
-    ap.add_argument("--devices", default=",".join(DEVICES))
+    ap.add_argument("--exclude", default="P2,P5,P14,P16,P17")
+    ap.add_argument("--devices", default="Earring,Ring,Watch")
     ap.add_argument("--raw-root", default=str(RAW_ROOT))
     ap.add_argument("--dataset-name", required=True)
     ap.add_argument("--out-dir", default=None)

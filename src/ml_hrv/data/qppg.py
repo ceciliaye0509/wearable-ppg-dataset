@@ -135,3 +135,67 @@ class QPPGFeatureScaler:
             np.asarray(state["std"], dtype=np.float32),
             np.asarray(state["base_median_ms"], dtype=np.float32),
         )
+
+
+@dataclass
+class QPPGRMSSDCalibrator:
+    """Train-only log-affine qPPG RMSSD calibration and safe residual bound.
+
+    The calibrator is deliberately simple: it addresses the observed global
+    qPPG scale mismatch before a neural model is allowed to make a correction.
+    The residual cap is a log-space 90th percentile from training rows only.
+    """
+
+    slope: float
+    intercept: float
+    target_median_ms: float
+    residual_cap_log: float
+    valid_train_rows: int
+
+    @classmethod
+    def fit(cls, rows: Iterable[dict[str, str]], target_rmssd_ms: Iterable[float]) -> "QPPGRMSSDCalibrator":
+        rows = list(rows)
+        target = np.asarray(list(target_rmssd_ms), dtype=float)
+        if len(rows) != len(target):
+            raise ValueError("qPPG calibration rows and targets have different lengths")
+        raw = np.asarray([_as_float(row, "qppg_rmssd_ms") for row in rows], dtype=float)
+        valid = np.asarray([_as_bool(row, "qppg_valid") > 0.5 for row in rows], dtype=bool)
+        valid &= np.isfinite(raw) & (raw > 0.0) & np.isfinite(target) & (target > 0.0)
+        if np.count_nonzero(valid) < 3:
+            raise ValueError("need at least three valid train qPPG RMSSD rows for calibration")
+        slope, intercept = np.polyfit(np.log(raw[valid]), np.log(target[valid]), 1)
+        calibrated_log = slope * np.log(raw[valid]) + intercept
+        residual_cap_log = float(np.quantile(np.abs(np.log(target[valid]) - calibrated_log), 0.90))
+        if not np.isfinite(residual_cap_log) or residual_cap_log <= 0.0:
+            raise ValueError("invalid train-only qPPG RMSSD residual cap")
+        return cls(
+            float(slope), float(intercept), float(np.median(target)), residual_cap_log,
+            int(np.count_nonzero(valid)),
+        )
+
+    def calibrated_base_ms(self, row: dict[str, str]) -> float:
+        raw = _as_float(row, "qppg_rmssd_ms")
+        if _as_bool(row, "qppg_valid") <= 0.5 or not np.isfinite(raw) or raw <= 0.0:
+            return self.target_median_ms
+        return float(np.exp(self.slope * np.log(raw) + self.intercept))
+
+    def state_dict(self) -> dict[str, object]:
+        return {
+            "method": "train_only_log_affine_qppg_rmssd_with_valid_median_fallback",
+            "slope": self.slope,
+            "intercept": self.intercept,
+            "target_median_ms": self.target_median_ms,
+            "residual_cap_log": self.residual_cap_log,
+            "residual_cap_quantile": 0.90,
+            "valid_train_rows": self.valid_train_rows,
+        }
+
+    @classmethod
+    def from_state_dict(cls, state: dict[str, object]) -> "QPPGRMSSDCalibrator":
+        if state.get("method") != "train_only_log_affine_qppg_rmssd_with_valid_median_fallback":
+            raise ValueError("unsupported qPPG RMSSD calibrator state")
+        return cls(
+            float(state["slope"]), float(state["intercept"]),
+            float(state["target_median_ms"]), float(state["residual_cap_log"]),
+            int(state["valid_train_rows"]),
+        )

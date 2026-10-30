@@ -1,5 +1,12 @@
 # Multi-site PPG: An In-the-Wild Physiological Dataset from Emerging Multi-site Wearables
 
+**Current HRV research handoff (v4.3, 2026-10-30):** start with
+[the project map and Windows migration guide](docs/hrv/WINDOWS_MODEL_HANDOFF.md).
+The verified local v4.3 ECG dataset is transferred separately from Git; the
+historical Hugging Face downloads below do not contain this release.
+The model comparison configuration is prepared for M1 adaptation, not yet a
+completed training run.
+
 ## Quick Start
 
 This repository provides baselines for heart rate estimation from PPG signals collected across four wearable sites (ring, earring, necklace, watch) in an in-the-wild setting. You can run heuristic baselines, supervised deep learning baselines, or optionally re-prepare the windowed dataset with a different window size.

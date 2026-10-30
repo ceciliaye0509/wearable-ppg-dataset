@@ -6,7 +6,7 @@
 #   1. 从原始 PPG/ECG 时间序列出发；
 #   2. 在共享的绝对时间网格上切分窗口；
 #   3. 将四个 PPG 设备的两个通道统一重采样到 target_fs Hz；
-#   4. 仅凭 PPG 采样覆盖率和 ECG 标签质控来决定窗口保留与否；
+#   4. 只保留极性已确认、ECG 质量合格且 PPG 覆盖率达标的窗口；
 #   5. 保存每个窗口、每个设备的平均加速度幅值，作为 motion 特征；
 #   6. ECG R-peak 位置数组作为主要标签。
 # PPG peak / IBI / SQI / PPG-derived HRV 不写入数据集；这些 baseline
@@ -21,7 +21,8 @@ It follows the updated dataset definition:
   - start from raw PPG/ECG timelines;
   - cut windows on one shared absolute-time grid;
   - resample selected PPG devices and both channels to a common target_fs Hz grid;
-  - include windows using only PPG sample coverage and ECG label QC;
+  - invert only stable negative-polarity ECG spans using an auditable manifest;
+  - retain only windows with fully classified polarity, stronger ECG QC, and sufficient PPG coverage;
   - store per-device window-level accelerometer mean magnitude for motion-aware models;
   - use ECG R-peak location arrays as the primary label.
 
@@ -61,6 +62,11 @@ if str(_SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(_SRC_ROOT))
 
 from heuristic_baselines.algorithms import hrv  # noqa: E402  # HRV 相关算法（IBI 校正、RMSSD 等）
+from heuristic_baselines.correct_ecg_polarity import (  # noqa: E402
+    _split_runs as _split_ecg_runs,
+    apply_manifest_polarity,
+    read_correction_intervals,
+)
 from prepare_windowed_dataset import config  # noqa: E402  # 项目级配置（路径、常量等）
 
 # ---------------------------------------------------------------------------
@@ -71,6 +77,11 @@ DEVICES: tuple[str, ...] = ("Earring", "Ring", "Watch")
 
 DEFAULT_MAX_IBI_CORRECTION_RATIO: float = 0.2 # ECG 每窗口纠正超过 20% 的 IBI → 标记 high_ecg_ibi_correction_ratio
 DEFAULT_MAX_RMSSD_MS: float = 200.0 # ECG RMSSD 超过 200ms → 标记 ecg_rmssd_too_high
+DEFAULT_MIN_ECG_QRS_SQI: float = 0.50
+DEFAULT_MAX_ECG_RAW_SPAN_UV: float = 5_000.0
+DEFAULT_MAX_ECG_BASELINE_WANDER_UV: float = 1_500.0
+HEURISTIC_OUTPUT_ROOT = Path(__file__).resolve().parents[1] / "heuristic_baselines" / "outputs"
+DEFAULT_POLARITY_OUTPUT = HEURISTIC_OUTPUT_ROOT / "ecg_polarity_correction_all20_v1"
 
 # ---------------------------------------------------------------------------
 # NeuroKit2 导入检查
@@ -262,6 +273,59 @@ def _load_ecg_raw(raw_root: Path, pid: str) -> dict[str, np.ndarray]:
         return {k: np.asarray(z[k]) for k in z.files}
 
 
+def _apply_polarity_manifest(
+    pid: str,
+    ecg_raw: dict[str, np.ndarray],
+    intervals: list[dict[str, object]],
+    polarity_blocks: list[dict[str, object]],
+) -> dict[str, np.ndarray]:
+    """Deduplicate ECG samples, apply accepted flips, and mark confident spans.
+
+    A polarity block is usable only when the block itself was confidently
+    classified positive or negative. Ambiguous/artifact blocks stay in the raw
+    source but are marked unusable for ground-truth windows, even if a nearby
+    stable run allowed the polarity detector to bridge across them.
+    """
+    times = np.asarray(ecg_raw["time_ms"], dtype=np.float64)
+    signal = np.asarray(ecg_raw["ecg_uv"], dtype=np.float64)
+    if times.ndim != 1 or signal.ndim != 1 or times.shape != signal.shape:
+        raise ValueError(f"{pid}: ECG time_ms and ecg_uv must be equal-length 1-D arrays")
+
+    finite = np.isfinite(times) & np.isfinite(signal)
+    times, signal = times[finite], signal[finite]
+    keep = np.ones(times.size, dtype=bool)
+    runs = _split_ecg_runs(times)
+    for left, right in runs:
+        if right - left > 1:
+            keep[left + 1:right] = np.diff(times[left:right]) > 0.0
+    times, signal = times[keep], signal[keep]
+
+    corrected, flip_mask = apply_manifest_polarity(pid, signal, times, intervals)
+    stable_mask = np.zeros(times.shape, dtype=bool)
+    participant_blocks = [
+        row for row in polarity_blocks
+        if str(row.get("participant", "")) == pid
+        and str(row.get("raw_polarity", "")) in {"positive", "negative"}
+    ]
+    blocks_by_run: dict[int, list[dict[str, object]]] = {}
+    for row in participant_blocks:
+        blocks_by_run.setdefault(int(float(row["run_index"])), []).append(row)
+    for run_index, (left, right) in enumerate(_split_ecg_runs(times)):
+        run_times = times[left:right]
+        for row in blocks_by_run.get(run_index, []):
+            block_left = int(np.searchsorted(run_times, float(row["start_ms"]), side="left"))
+            block_right = int(np.searchsorted(run_times, float(row["end_ms"]), side="left"))
+            if block_right > block_left:
+                stable_mask[left + block_left:left + block_right] = True
+
+    out = dict(ecg_raw)
+    out["time_ms"] = times
+    out["ecg_uv"] = corrected
+    out["polarity_valid_sample_mask"] = stable_mask
+    out["polarity_flip_sample_mask"] = flip_mask
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 辅助函数：从时间戳序列（毫秒）推断采样率 (Hz)
 # 计算相邻有效时间戳的中位间隔，然后转换为频率
@@ -374,6 +438,10 @@ def _ecg_label_for_window(
     max_hr_bpm: float,
     min_ecg_valid_sample_ratio: float,
     detector_method: str,
+    min_ecg_qrs_sqi: float = DEFAULT_MIN_ECG_QRS_SQI,
+    max_ecg_raw_span_uv: float = DEFAULT_MAX_ECG_RAW_SPAN_UV,
+    max_ecg_baseline_wander_uv: float = DEFAULT_MAX_ECG_BASELINE_WANDER_UV,
+    strict_ground_truth_qc: bool = False,
 ) -> dict[str, object]:
     window_ms = t1 - t0
     ecg = np.asarray(ecg_raw["ecg_uv"], dtype=np.float64)
@@ -383,7 +451,33 @@ def _ecg_label_for_window(
     hi = int(np.searchsorted(raw_t, t1, side="right"))
     seg = ecg[lo:hi]  # 截取窗口内的 ECG 信号片段
     expected_n = max(1, int(round((window_ms / 1000.0) * ecg_fs)))  # 理论应有的样本数
-    valid_ratio = float(np.isfinite(seg).sum() / expected_n) if seg.size else 0.0  # 有效样本覆盖率
+    valid_ratio = min(1.0, float(np.isfinite(seg).sum() / expected_n)) if seg.size else 0.0  # 有效样本覆盖率
+    polarity_mask_all = np.asarray(
+        ecg_raw.get("polarity_valid_sample_mask", np.ones(raw_t.shape, dtype=bool)),
+        dtype=bool,
+    )
+    flip_mask_all = np.asarray(
+        ecg_raw.get("polarity_flip_sample_mask", np.zeros(raw_t.shape, dtype=bool)),
+        dtype=bool,
+    )
+    polarity_valid_ratio = float(polarity_mask_all[lo:hi].mean()) if hi > lo else 0.0
+    polarity_flip_ratio = float(flip_mask_all[lo:hi].mean()) if hi > lo else 0.0
+
+    finite_seg = seg[np.isfinite(seg)]
+    raw_span = float(np.quantile(finite_seg, 0.99) - np.quantile(finite_seg, 0.01)) if finite_seg.size else float("inf")
+    if finite_seg.size and np.isfinite(ecg_fs) and ecg_fs > 0:
+        baseline_block_n = max(1, int(round(2.0 * ecg_fs)))
+        baseline_medians = np.asarray([
+            np.median(finite_seg[left:left + baseline_block_n])
+            for left in range(0, finite_seg.size, baseline_block_n)
+            if finite_seg[left:left + baseline_block_n].size
+        ], dtype=np.float64)
+        baseline_wander = (
+            float(np.quantile(baseline_medians, 0.95) - np.quantile(baseline_medians, 0.05))
+            if baseline_medians.size >= 3 else float("inf")
+        )
+    else:
+        baseline_wander = float("inf")
 
     # ★ R-peak 检测：使用 NeuroKit2 Pan-Tompkins 算法
     peak_times = np.array([], dtype=np.float64)
@@ -440,21 +534,49 @@ def _ecg_label_for_window(
     #   - RMSSD 有限且不超标
     #   - IBI 校正比例不超标
     #   - 心率在合理范围内
+    #   - polarity is confidently classified for every sample in the window
+    #   - raw amplitude range, baseline wander, and QRS-SQI meet conservative gates
     min_peak_count = int(math.floor((window_ms / 1000.0) * min_hr_bpm / 60.0))
+    strict_quality_pass = (
+        polarity_valid_ratio >= 1.0
+        and raw_span <= max_ecg_raw_span_uv
+        and baseline_wander <= max_ecg_baseline_wander_uv
+        and np.isfinite(qrs_sqi) and qrs_sqi >= min_ecg_qrs_sqi
+    ) if strict_ground_truth_qc else True
+    correction_ratio_pass = (
+        np.isfinite(corr_ratio) and corr_ratio <= DEFAULT_MAX_IBI_CORRECTION_RATIO
+        if strict_ground_truth_qc
+        else (not np.isfinite(corr_ratio) or corr_ratio <= DEFAULT_MAX_IBI_CORRECTION_RATIO)
+    )
+    heart_rate_pass = (
+        np.isfinite(hr_bpm) and min_hr_bpm <= hr_bpm <= max_hr_bpm
+        if strict_ground_truth_qc
+        else (not np.isfinite(hr_bpm) or min_hr_bpm <= hr_bpm <= max_hr_bpm)
+    )
     qc_pass = bool(
         valid_ratio >= min_ecg_valid_sample_ratio
+        and strict_quality_pass
         and valid_ibi_ratio >= min_valid_ibi_ratio
         and peak_count >= max(3, min_peak_count)
         and peak_count <= MAX_PEAKS_PER_WINDOW
         and np.isfinite(rmssd)
-        and (not np.isfinite(corr_ratio) or corr_ratio <= DEFAULT_MAX_IBI_CORRECTION_RATIO)
-        and (not np.isfinite(hr_bpm) or (min_hr_bpm <= hr_bpm <= max_hr_bpm))
-        and (not np.isfinite(rmssd) or rmssd <= DEFAULT_MAX_RMSSD_MS)
+        and correction_ratio_pass
+        and heart_rate_pass
+        and rmssd <= DEFAULT_MAX_RMSSD_MS
     )
     # 收集质控失败原因（用于诊断和调试）
     reasons: list[str] = []
     if valid_ratio < min_ecg_valid_sample_ratio:
         reasons.append("low_ecg_sample_ratio")          # ECG 采样覆盖率不足
+    if strict_ground_truth_qc:
+        if polarity_valid_ratio < 1.0:
+            reasons.append("unresolved_ecg_polarity")
+        if raw_span > max_ecg_raw_span_uv:
+            reasons.append("high_raw_ecg_amplitude_span")
+        if baseline_wander > max_ecg_baseline_wander_uv:
+            reasons.append("high_ecg_baseline_wander")
+        if not np.isfinite(qrs_sqi) or qrs_sqi < min_ecg_qrs_sqi:
+            reasons.append("low_ecg_qrs_sqi")
     if valid_ibi_ratio < min_valid_ibi_ratio:
         reasons.append("low_ecg_valid_ibi_ratio")       # 有效 IBI 比例过低
     if peak_count < max(3, min_peak_count):
@@ -463,11 +585,16 @@ def _ecg_label_for_window(
         reasons.append("too_many_ecg_peaks")            # R-peak 数量超过生理上限
     if not np.isfinite(rmssd):
         reasons.append("invalid_ecg_hrv")               # HRV 指标无效
-    if np.isfinite(corr_ratio) and corr_ratio > DEFAULT_MAX_IBI_CORRECTION_RATIO:
+    if ((not np.isfinite(corr_ratio) or corr_ratio > DEFAULT_MAX_IBI_CORRECTION_RATIO)
+            and strict_ground_truth_qc):
         reasons.append("high_ecg_ibi_correction_ratio") # IBI 校正比例过高
-    if np.isfinite(hr_bpm) and not (min_hr_bpm <= hr_bpm <= max_hr_bpm):
+    elif np.isfinite(corr_ratio) and corr_ratio > DEFAULT_MAX_IBI_CORRECTION_RATIO:
+        reasons.append("high_ecg_ibi_correction_ratio") # IBI 校正比例过高
+    if (not np.isfinite(hr_bpm) or not (min_hr_bpm <= hr_bpm <= max_hr_bpm)) and strict_ground_truth_qc:
         reasons.append("ecg_hr_out_of_range")           # 心率超出合理范围
-    if np.isfinite(rmssd) and rmssd > DEFAULT_MAX_RMSSD_MS:
+    elif np.isfinite(hr_bpm) and not (min_hr_bpm <= hr_bpm <= max_hr_bpm):
+        reasons.append("ecg_hr_out_of_range")           # 心率超出合理范围
+    if rmssd > DEFAULT_MAX_RMSSD_MS:
         reasons.append("ecg_rmssd_too_high")            # RMSSD 过高
     if detector_method == "bad_ecg_fs":
         reasons.append(detector_method)                  # ECG 采样率异常
@@ -482,6 +609,10 @@ def _ecg_label_for_window(
         "ecg_rmssd_ms": rmssd,                                         # RMSSD (ms)
         "ecg_sdnn_ms": sdnn,                                           # SDNN (ms)
         "ecg_valid_sample_ratio": valid_ratio,                         # ECG 有效样本覆盖率
+        "ecg_polarity_valid_sample_ratio": polarity_valid_ratio,
+        "ecg_polarity_flip_sample_ratio": polarity_flip_ratio,
+        "ecg_raw_p01_p99_span_uv": raw_span,
+        "ecg_baseline_wander_p05_p95_uv": baseline_wander,
         "ecg_valid_ibi_ratio": valid_ibi_ratio,                        # 有效 IBI 比例
         "ecg_ibi_correction_ratio": corr_ratio,                        # IBI 校正比例
         "ecg_qc_pass": qc_pass,                                        # 质控是否通过
@@ -581,7 +712,9 @@ A window is kept only if:
    `alignment_tolerance_sec`;
 2. every device/channel has `ppg_valid_sample_ratio >= min_valid_sample_ratio`
    after target_fs Hz resampling;
-3. ECG label QC passes.
+3. every ECG sample is inside a directly classified stable-polarity block;
+4. polarity-corrected ECG label QC passes, including QRS-SQI, raw amplitude-span,
+   baseline-wander, valid-IBI, peak-count, heart-rate, and RMSSD gates.
 
 PPG peak detection, PPG-derived HRV, SQI, and PPG quality flags are not stored
 in this dataset. They are baseline-derived artifacts and should be computed by
@@ -608,6 +741,8 @@ baseline/evaluation code.
 | `ecg_rmssd_ms`, `ecg_sdnn_ms` | ECG-derived HRV labels from corrected RR intervals |
 | `ecg_label_qc_pass`, `ecg_label_qc_reason` | final ECG label trustworthiness flag/reason |
 | `ecg_qrs_sqi` | simple raw-ECG QRS prominence/consistency SQI |
+| `ecg_polarity_flip_sample_ratio` | fraction of the window inverted by the stable negative-polarity manifest |
+| `ecg_raw_p01_p99_span_uv`, `ecg_baseline_wander_p05_p95_uv` | ECG artifact metrics used by the stronger QC gate |
 | `accel_mean_mag` | mean accelerometer magnitude per window/device |
 
 ## Summary
@@ -644,6 +779,13 @@ def generate_participant(
 
     ecg_min_valid_ibi_ratio: float,
     min_ecg_valid_sample_ratio: float,
+    min_ecg_qrs_sqi: float,
+    max_ecg_raw_span_uv: float,
+    max_ecg_baseline_wander_uv: float,
+    polarity_intervals: list[dict[str, object]],
+    polarity_blocks: list[dict[str, object]],
+    polarity_intervals_path: Path,
+    polarity_blocks_path: Path,
     min_hr_bpm: float,
     max_hr_bpm: float,
     max_windows: int | None,
@@ -651,7 +793,12 @@ def generate_participant(
     # --- 第 1 步：加载原始数据并计算基本参数 ---
     print(f"[{pid}] loading raw data")
     ppg_raw = _load_ppg_raw(raw_root, pid, devices)    # 加载选定设备 PPG
-    ecg_raw = _load_ecg_raw(raw_root, pid)              # 加载 ECG
+    ecg_raw = _apply_polarity_manifest(
+        pid,
+        _load_ecg_raw(raw_root, pid),
+        polarity_intervals,
+        polarity_blocks,
+    )  # 去重、按冻结清单纠正极性，并标记未确认极性样本
     target_len = int(round(window_sec * target_fs))     # 窗口在 target_fs 下的样本数
     sample_step_ms = 1000.0 / target_fs                 # 每个样本间隔（ms）
     window_ms = window_sec * 1000.0
@@ -730,11 +877,16 @@ def generate_participant(
             max_hr_bpm=max_hr_bpm,
             min_ecg_valid_sample_ratio=min_ecg_valid_sample_ratio,
             detector_method=ecg_detector,
+            min_ecg_qrs_sqi=min_ecg_qrs_sqi,
+            max_ecg_raw_span_uv=max_ecg_raw_span_uv,
+            max_ecg_baseline_wander_uv=max_ecg_baseline_wander_uv,
+            strict_ground_truth_qc=True,
         )
         labels.append(label)
         ecg_keep_pre.append(bool(label["ecg_label_qc_pass"]))
 
-    # ★ 合并边界对齐 + ECG 质控结果，筛选出初步保留的窗口索引
+    # Only windows with fully confident polarity and every ECG quality gate
+    # are eligible for the new ECG ground-truth dataset.
     boundary_keep_arr = np.asarray(boundary_keep, dtype=bool)
     ecg_keep_arr = np.asarray(ecg_keep_pre, dtype=bool)
     prelim_idx = np.where(boundary_keep_arr & ecg_keep_arr)[0]
@@ -750,7 +902,7 @@ def generate_participant(
             "skip_reason": "no_window_after_boundary_and_ecg_qc",
         }
         pd.DataFrame([summary]).to_csv(out_dir / f"{dataset_name}_{pid}_summary.csv", index=False)
-        print(f"[SKIP] {pid}: no windows after boundary + ECG QC")
+        print(f"[SKIP] {pid}: no windows after boundary and ECG QC")
         return None
 
     # --- 第 4 步：★ 预分配输出数组（重点） ---
@@ -768,7 +920,7 @@ def generate_participant(
 
     # --- 第 5 步：★★ PPG 重采样、motion 均值和 PPG 采样覆盖率检查（重点） ---
     final_keep = np.ones(n_pre, dtype=bool)
-    print(f"[{pid}] resampling PPG for {n_pre} ECG-valid windows")
+    print(f"[{pid}] resampling PPG for {n_pre} polarity-corrected ECG-QC-pass windows")
     for out_i, wi in enumerate(prelim_idx):
         t0 = float(t0_all[wi])
         grid_ms = t0 + np.arange(target_len, dtype=np.float64) * sample_step_ms  # target_fs 时间网格
@@ -845,11 +997,18 @@ def generate_participant(
 
 
         "ecg_detector": "window_neurokit2_pantompkins1985",
+        "ecg_polarity_intervals": str(polarity_intervals_path),
+        "ecg_polarity_blocks": str(polarity_blocks_path),
+        "ecg_polarity_correction": "stable negative polarity intervals inverted in memory; windows require every sample to have directly classified polarity",
         "ecg_fs_inferred_hz": ecg_fs,
         "ecg_min_valid_ibi_ratio": ecg_min_valid_ibi_ratio,
         "min_ecg_valid_sample_ratio": min_ecg_valid_sample_ratio,
+        "min_ecg_qrs_sqi": min_ecg_qrs_sqi,
+        "max_ecg_raw_span_uv": max_ecg_raw_span_uv,
+        "max_ecg_baseline_wander_uv": max_ecg_baseline_wander_uv,
+        "strict_ground_truth_qc": True,
         "primary_label": "ecg_r_peak_times_rel_ms",
-        "inclusion_rule": "raw_boundary_aligned && ecg_label_qc_pass && ppg_valid_sample_ratio>=min_valid_sample_ratio for all device/channel",
+        "inclusion_rule": "raw_boundary_aligned && fully_confident_polarity && ecg_label_qc_pass && ppg_valid_sample_ratio>=min_valid_sample_ratio for all device/channel",
         "ppg_derived_metadata_in_dataset": False,
         "accel_motion_feature": "accel_motion_mean_mag = mean(abs(sqrt(accel_x^2+accel_y^2+accel_z^2) - gravity_reference))",
         "accel_gravity_reference_by_device": accel_gravity_reference,
@@ -879,6 +1038,10 @@ def generate_participant(
         ecg_rmssd_ms=np.array([x["ecg_rmssd_ms"] for x in kept_labels], dtype=np.float32),
         ecg_sdnn_ms=np.array([x["ecg_sdnn_ms"] for x in kept_labels], dtype=np.float32),
         ecg_valid_sample_ratio=np.array([x["ecg_valid_sample_ratio"] for x in kept_labels], dtype=np.float32),
+        ecg_polarity_valid_sample_ratio=np.array([x["ecg_polarity_valid_sample_ratio"] for x in kept_labels], dtype=np.float32),
+        ecg_polarity_flip_sample_ratio=np.array([x["ecg_polarity_flip_sample_ratio"] for x in kept_labels], dtype=np.float32),
+        ecg_raw_p01_p99_span_uv=np.array([x["ecg_raw_p01_p99_span_uv"] for x in kept_labels], dtype=np.float32),
+        ecg_baseline_wander_p05_p95_uv=np.array([x["ecg_baseline_wander_p05_p95_uv"] for x in kept_labels], dtype=np.float32),
         ecg_valid_ibi_ratio=np.array([x["ecg_valid_ibi_ratio"] for x in kept_labels], dtype=np.float32),
         ecg_ibi_correction_ratio=np.array([x["ecg_ibi_correction_ratio"] for x in kept_labels], dtype=np.float32),
         ecg_qc_pass=np.array([x["ecg_qc_pass"] for x in kept_labels], dtype=bool),
@@ -932,18 +1095,19 @@ def generate_participant(
 def main() -> None:
     # --- 命令行参数定义 ---
     ap = argparse.ArgumentParser(description="Generate raw-aligned multi-device ECG-label dataset.")
-    ap.add_argument("--participants", default=None)          # 指定参与者（逗号分隔）
-    ap.add_argument("--exclude", default="P2,P14,P16,P17")   # 排除的参与者
+    default_participants = ",".join(f"P{i}" for i in range(1, 21))
+    ap.add_argument("--participants", default=default_participants, help="Comma-separated participant IDs; default: P1-P20.")
+    ap.add_argument("--exclude", default="", help="Optional comma-separated participant IDs to omit; default: none.")
     ap.add_argument(
         "--devices",
-        default=",".join(DEVICES),
+        default="Earring,Ring,Watch",
         help="Comma-separated PPG devices to include. Default: Earring,Ring,Watch.",
     )
     ap.add_argument("--raw-root", default=str(RAW_ROOT))                  # 原始数据根目录
     ap.add_argument("--dataset-name", required=True)                       # 数据集名称（必填）
     ap.add_argument("--out-dir", default=None)                              # 输出目录
     ap.add_argument("--window-sec", type=int, default=300)                  # 窗口时长（秒）
-    ap.add_argument("--stride-sec", type=int, default=300)                  # 窗口步长（秒）
+    ap.add_argument("--stride-sec", type=int, default=30)                   # 窗口步长（秒）
     ap.add_argument("--target-fs", type=float, default=50.0)                # 目标采样率 (Hz)
     ap.add_argument("--alignment-tolerance-sec", type=float, default=2.0)   # 边界对齐容差（秒）
     ap.add_argument("--min-valid-sample-ratio", type=float, default=0.50)   # PPG 最低有效采样比
@@ -951,6 +1115,11 @@ def main() -> None:
 
     ap.add_argument("--ecg-min-valid-ibi-ratio", type=float, default=1.00)  # ECG 最低有效 IBI 比
     ap.add_argument("--min-ecg-valid-sample-ratio", type=float, default=1.0)  # ECG 最低有效采样比
+    ap.add_argument("--polarity-intervals", type=Path, default=DEFAULT_POLARITY_OUTPUT / "correction_intervals.csv")
+    ap.add_argument("--polarity-blocks", type=Path, default=DEFAULT_POLARITY_OUTPUT / "polarity_blocks.csv")
+    ap.add_argument("--min-ecg-qrs-sqi", type=float, default=DEFAULT_MIN_ECG_QRS_SQI)
+    ap.add_argument("--max-ecg-raw-span-uv", type=float, default=DEFAULT_MAX_ECG_RAW_SPAN_UV)
+    ap.add_argument("--max-ecg-baseline-wander-uv", type=float, default=DEFAULT_MAX_ECG_BASELINE_WANDER_UV)
     ap.add_argument("--min-hr-bpm", type=float, default=30.0)               # 最低心率 (BPM)
     ap.add_argument("--max-hr-bpm", type=float, default=200.0)              # 最高心率 (BPM)
     ap.add_argument("--max-windows", type=int, default=None)                # 调试用：最大窗口数
@@ -962,13 +1131,41 @@ def main() -> None:
     participants = _participant_ids(raw_root, args.participants)
     excluded = {config.normalize_participant_id(p) for p in args.exclude.split(",") if p.strip()}
     participants = [p for p in participants if p not in excluded]  # 过滤排除的参与者
-    # 设备名称校验
+    if not participants:
+        raise SystemExit("no participants selected")
+    if not 0.0 <= args.min_ecg_qrs_sqi <= 1.0:
+        raise SystemExit("--min-ecg-qrs-sqi must be in [0, 1]")
+    if args.max_ecg_raw_span_uv <= 0.0 or args.max_ecg_baseline_wander_uv <= 0.0:
+        raise SystemExit("ECG amplitude and baseline-wander limits must be positive")
     device_lookup = {d.lower(): d for d in DEVICES}
     devices = [device_lookup.get(d.strip().lower(), d.strip()) for d in args.devices.split(",") if d.strip()]
     unknown_devices = sorted(set(devices) - set(DEVICES))
     if unknown_devices:
         raise SystemExit(f"Unknown devices: {unknown_devices}. Valid devices: {DEVICES}")
-
+    missing_sources = [
+        str(path)
+        for pid in participants
+        for path in [raw_root / pid / f"{pid}_polar_ecg_raw.npz"]
+        + [_raw_path(raw_root, pid, device) for device in devices]
+        if not path.is_file()
+    ]
+    if missing_sources:
+        raise FileNotFoundError("missing selected raw source file(s): " + ", ".join(missing_sources))
+    polarity_intervals_path = args.polarity_intervals.resolve()
+    polarity_blocks_path = args.polarity_blocks.resolve()
+    if not polarity_intervals_path.is_file() or not polarity_blocks_path.is_file():
+        raise FileNotFoundError(
+            "polarity manifests are required; run correct_ecg_polarity.py first. Missing: "
+            + ", ".join(str(p) for p in (polarity_intervals_path, polarity_blocks_path) if not p.is_file())
+        )
+    polarity_intervals = read_correction_intervals(polarity_intervals_path)
+    polarity_blocks_frame = pd.read_csv(polarity_blocks_path)
+    if not {"participant", "run_index", "start_ms", "end_ms", "raw_polarity"}.issubset(polarity_blocks_frame.columns):
+        raise ValueError(f"invalid polarity-block manifest: {polarity_blocks_path}")
+    polarity_blocks = polarity_blocks_frame.to_dict("records")
+    missing_polarity = sorted(set(participants) - set(polarity_blocks_frame["participant"].astype(str)))
+    if missing_polarity:
+        raise ValueError(f"polarity block manifest lacks selected participant(s): {missing_polarity}")
     # --- 保存全局配置并开始遍历参与者 ---
     cfg = {
         "dataset_name": args.dataset_name,
@@ -989,6 +1186,13 @@ def main() -> None:
         "ecg_detector": "window_neurokit2_pantompkins1985",
         "ecg_min_valid_ibi_ratio": args.ecg_min_valid_ibi_ratio,
         "min_ecg_valid_sample_ratio": args.min_ecg_valid_sample_ratio,
+        "min_ecg_qrs_sqi": args.min_ecg_qrs_sqi,
+        "max_ecg_raw_span_uv": args.max_ecg_raw_span_uv,
+        "max_ecg_baseline_wander_uv": args.max_ecg_baseline_wander_uv,
+        "strict_ground_truth_qc": True,
+        "polarity_intervals": str(polarity_intervals_path),
+        "polarity_blocks": str(polarity_blocks_path),
+        "inclusion_rule": "boundary_aligned && stable_polarity_every_sample && ECG_QC_pass && PPG_coverage_pass",
         "primary_label": "ecg_r_peak_times_rel_ms",
         "ppg_derived_metadata_in_dataset": False,
     }
@@ -1024,6 +1228,13 @@ def main() -> None:
 
                 ecg_min_valid_ibi_ratio=args.ecg_min_valid_ibi_ratio,
                 min_ecg_valid_sample_ratio=args.min_ecg_valid_sample_ratio,
+                min_ecg_qrs_sqi=args.min_ecg_qrs_sqi,
+                max_ecg_raw_span_uv=args.max_ecg_raw_span_uv,
+                max_ecg_baseline_wander_uv=args.max_ecg_baseline_wander_uv,
+                polarity_intervals=polarity_intervals,
+                polarity_blocks=polarity_blocks,
+                polarity_intervals_path=polarity_intervals_path,
+                polarity_blocks_path=polarity_blocks_path,
                 min_hr_bpm=args.min_hr_bpm,
                 max_hr_bpm=args.max_hr_bpm,
                 max_windows=args.max_windows,

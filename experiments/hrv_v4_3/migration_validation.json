@@ -1,0 +1,74 @@
+{
+  "legacy_ml_hrv_synthetic_smoke": "passed",
+  "polarity_python_tests": {
+    "run": 85,
+    "passed": 85
+  },
+  "peak_review_python_tests": {
+    "run": 40,
+    "passed": 12,
+    "blocked": 28,
+    "reason": "The current sandbox denies binding ephemeral local HTTP sockets. No assertion failures were observed in the12 non-HTTP tests.",
+    "raw_log": "validation/peak_review_tests.log"
+  },
+  "frontend_test_scripts": [
+    {
+      "file": "wearable-ppg-dataset/src/heuristic_baselines/polarity_audit/tests/test_comparison_ui.cjs",
+      "exit_code": 0
+    },
+    {
+      "file": "wearable-ppg-dataset/src/heuristic_baselines/polarity_audit/tests/test_direction_truth_ui.cjs",
+      "exit_code": 0
+    },
+    {
+      "file": "wearable-ppg-dataset/src/heuristic_baselines/polarity_audit/tests/test_gate_review_ui.cjs",
+      "exit_code": 0
+    },
+    {
+      "file": "wearable-ppg-dataset/src/heuristic_baselines/polarity_audit/tests/test_replacement_ui.cjs",
+      "exit_code": 0
+    },
+    {
+      "file": "wearable-ppg-dataset/src/heuristic_baselines/polarity_audit/tests/test_triad_ui.cjs",
+      "exit_code": 0
+    },
+    {
+      "file": "wearable-ppg-dataset/src/heuristic_baselines/polarity_audit/tests/test_ui.cjs",
+      "exit_code": 0
+    },
+    {
+      "file": "wearable-ppg-dataset/src/heuristic_baselines/remote_ecg_review/tests/test_app_batches.cjs",
+      "exit_code": 0
+    },
+    {
+      "file": "wearable-ppg-dataset/src/heuristic_baselines/remote_ecg_review/tests/test_app_full_window.cjs",
+      "exit_code": 0
+    },
+    {
+      "file": "wearable-ppg-dataset/src/heuristic_baselines/remote_ecg_review/tests/test_app_intervals.cjs",
+      "exit_code": 0
+    }
+  ],
+  "pending_python_syntax_checks": 96,
+  "diff_whitespace_check": "passed",
+  "target_Windows_CUDA_test": "not_run_on_target_machine",
+  "M1_implementation_complete": false,
+  "formal_training_started": false,
+  "dataset_transfer": {
+    "status": "full_transfer_verification_passed",
+    "dataset_name": "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029",
+    "protocol_sha256": "d39ea6d77a4f753824948ab25b77e08ab62c457a5cc8e1b67dfcb9b341ee95b8",
+    "candidate_windows": 14036,
+    "valid_ecg_label_windows": 10271,
+    "hashed_files": 56,
+    "unhashed_files": [],
+    "folds_passed": 4
+  },
+  "source_model_smoke": {
+    "status": "synthetic_forward_backward_passed",
+    "device": "cpu",
+    "batch_size": 8,
+    "samples": 15000,
+    "optimizer_step_performed": false
+  }
+}

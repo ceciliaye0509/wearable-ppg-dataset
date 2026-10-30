@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>ECG Peak Review</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <section id="startup-error" class="startup-card" hidden>
+    <div class="brand-mark" aria-hidden="true">⌁</div>
+    <p class="eyebrow">ECG REVIEW WORKSPACE</p>
+    <h1>Open the review workspace</h1>
+    <p id="startup-error-message">This app must be opened through its review server, not as a local file or CSV export.</p>
+    <p>Start the server on the data host, then open:</p>
+    <code>http://127.0.0.1:8765/</code>
+    <p>For setup and remote-access instructions, see the <a href="README.md">review workspace README</a>.</p>
+  </section>
+
+  <main id="app-shell" class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">⌁</div>
+        <div><p class="eyebrow">ECG REVIEW WORKSPACE</p><h1>Peak review</h1></div>
+      </div>
+      <div class="account"><a class="export" href="http://127.0.0.1:8768/">Polarity direction review</a><span id="reviewer-label"></span><button id="logout" class="quiet" hidden>Sign out</button></div>
+    </header>
+
+    <section class="intro">
+      <div><h2>Review each ECG segment</h2><p>Select a batch and participant. Full five-minute windows have 60 pages to check and a separate saved review for each reviewer name. Add, remove, clear, or restore candidate peaks, and mark unreadable intervals where needed.</p></div>
+      <div class="privacy-chip"><span></span> Waveforms and shared progress stay on the review host</div>
+    </section>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="side-heading"><div><h3>Participants</h3><p>Select anyone to start or continue</p></div><a class="export" href="/api/export.csv">Export annotations</a></div>
+        <label class="batch-label" for="batch-filter">Review batch</label>
+        <select id="batch-filter" class="search" aria-label="Review batch"><option value="existing">Existing review</option></select>
+        <p id="batch-summary" class="subtle" aria-live="polite"></p>
+        <input id="participant-search" class="search" type="search" placeholder="Filter participants…" aria-label="Filter participants">
+        <div id="participant-list" class="participant-list" aria-live="polite"></div>
+      </aside>
+
+      <section class="workspace">
+        <div id="empty-state" class="empty-state">
+          <div class="empty-icon">↗</div><h3>Select a participant</h3><p>Choose anyone who has not started or is in progress. Progress is shared across authorized devices connected to this review host.</p>
+        </div>
+        <div id="review-panel" hidden>
+          <div class="review-head">
+            <div><p class="eyebrow">CURRENT PARTICIPANT</p><h2 id="participant-title">—</h2><p id="participant-progress" class="subtle"></p></div>
+            <div class="review-actions"><label class="confidence">Confidence<select id="confidence" aria-label="Confidence"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><a class="export" href="/api/export.csv">Download annotations</a></div>
+          </div>
+
+          <div id="clip-list" class="clip-list" aria-label="Review segments"></div>
+          <div id="clip-meta" class="clip-meta"></div>
+          <section id="full-window-panel" class="full-window-panel" hidden aria-label="Full five-minute review progress">
+            <h3>Full 5-minute HRV validation</h3>
+            <p id="review-scope-note"></p>
+            <p id="full-window-progress" role="status"></p>
+            <details><summary>Jump to a five-second page</summary><div id="page-grid" class="page-grid" aria-label="Five-second review pages"></div></details>
+            <p id="team-progress" class="subtle"></p>
+            <details><summary>Export for comparison</summary><p><a href="/api/full-window-export.csv">Download all reviewers' saved full-window annotations</a>. Each reviewer has separate rows. Use this after first-pass annotation to compare differences; the page never loads another person's peak marks.</p></details>
+          </section>
+          <section id="quality-panel" class="quality-panel" aria-label="Automatic ECG screening flags">
+            <h3>Automatic screening</h3>
+            <p id="quality-status" role="status"></p>
+            <p class="quality-explanation">Violet bands show automatic screening flags. Amber areas are your unreadable intervals. Peak marks remain visible and editable in both.</p>
+            <div id="quality-list" class="quality-list"></div>
+            <details><summary>Screening rule and existing polarity correction</summary><p id="quality-rule-text"></p></details>
+          </section>
+          <section id="rr-review-panel" class="quality-panel" hidden>
+            <h3>RR-correction discrepancy review</h3>
+            <p id="rr-review-description"></p>
+            <p>Red dots are your editable ECG marks. Purple crosses are optional RR-correction proposals, not verified waveform peaks. Judge the ECG waveform; do not move a clear QRS just to make RR intervals regular.</p>
+            <div id="rr-review-jumps" class="zoom-controls" style="flex-wrap:wrap"></div>
+            <button id="rr-review-toggle" class="secondary" type="button" aria-pressed="false">Show RR proposals (read-only)</button>
+          </section>
+          <section id="deferred-screening-panel" class="quality-panel" hidden>
+            <h3>Amplitude-rule review</h3>
+            <p id="deferred-screening-status"></p>
+            <button id="reveal-screening" class="secondary">Reveal automatic screening after first-pass review</button>
+          </section>
+          <div class="plot-card">
+            <div class="plot-top"><span class="legend"><i></i>Current peak markers</span><div class="zoom-controls"><span id="page-position"></span><button id="zoom-out" class="icon-button" aria-label="Show full segment">Full</button><button id="zoom-prev" class="icon-button" aria-label="Previous five seconds">← 5 sec</button><button id="zoom-next" class="icon-button" aria-label="Next five seconds">5 sec →</button></div></div>
+            <canvas id="plot" width="1100" height="450" aria-label="ECG waveform. Click to add or remove peak markers."></canvas>
+            <div class="plot-foot"><span>Click near a red marker to remove it; click an unmarked QRS peak to add it. Zoom in for precise placement.</span><span id="peak-count"></span></div>
+            <div id="full-window-actions" class="page-actions" hidden><button id="next-unreviewed" class="secondary">Next unreviewed page</button><button id="confirm-page" class="primary">Confirm page &amp; save →</button></div>
+          </div>
+          <section class="unreadable-panel" aria-label="Unreadable intervals">
+            <p id="unreadable-help">Unreadable intervals are shaded in amber. Peak marks are kept, including marks inside these intervals. Times below are relative to the start of this segment. Save as in progress or complete to keep your changes.</p>
+            <p id="range-mode-help" hidden>Drag across the waveform, or click the start and end of an unreadable interval. Double-click “Cannot reliably read” to cancel selection mode. Remove an existing interval below to cancel its label.</p>
+            <button id="mark-whole-unreadable" class="secondary" hidden>Mark the whole segment unreadable</button>
+            <div id="unreadable-list" class="unreadable-list" aria-live="polite"></div>
+          </section>
+
+          <div class="review-bottom">
+            <label class="notes-label">Notes (optional)<input id="notes" maxlength="1000" placeholder="For example: continuous motion artifact; local peaks are uncertain"></label>
+            <div class="save-actions"><button id="restore-saved" class="secondary">Restore last saved marks</button><button id="reset-candidates" class="secondary">Restore original marks</button><button id="clear-peaks" class="secondary">Clear peak marks</button><button id="save-progress" class="secondary">Save as in progress</button><button id="save-unresolvable" class="warning" aria-pressed="false" title="Single-click to select unreadable intervals; double-click to cancel selection mode">Cannot reliably read</button><button id="complete-clip" class="primary">Complete segment →</button></div>
+          </div>
+          <p id="save-message" class="save-message" role="status"></p>
+          <p id="blind-note" class="blind-note">New segments show anonymous algorithm-assisted candidates. Previous segments load saved manual marks; edits here are saved separately from the source annotation file.</p>
+        </div>
+      </section>
+    </div>
+    <footer>ECG review · Research annotation only; not for clinical diagnosis</footer>
+  </main>
+
+  <dialog id="login-dialog">
+    <form id="login-form" method="dialog" class="login-card">
+      <div class="brand-mark login-mark" aria-hidden="true">⌁</div><p class="eyebrow">PRIVATE REVIEW WORKSPACE</p><h2>Sign in</h2><p>Enter the access code provided by the administrator and your reviewer name. The access code is not stored with annotations.</p>
+      <label>Reviewer name<input id="reviewer-input" name="reviewer" autocomplete="name" maxlength="64" required placeholder="For example, Reviewer A"></label><p>Use the same name each time to resume your five-minute reviews. Different names save separate full-window annotations.</p>
+      <label>Access code<input id="access-code" name="accessCode" type="password" autocomplete="current-password" required></label>
+      <p id="login-error" class="error" role="alert"></p><button class="primary login-submit" type="submit">Enter workspace</button>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

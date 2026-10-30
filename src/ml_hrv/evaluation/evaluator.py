@@ -27,6 +27,7 @@ def evaluate_model(
     fold_name: str,
     beat_trained: bool,
     max_batches: int = 0,
+    qppg_rmssd_residual_cap_normalized: float | None = None,
 ) -> list[dict[str, object]]:
     model.eval()
     rows: list[dict[str, object]] = []
@@ -34,6 +35,7 @@ def evaluate_model(
         for batch_index, raw_batch in enumerate(loader):
             batch = _move(raw_batch, device)
             qppg_features = batch.get("qppg_features")
+            qppg_valid = batch.get("qppg_valid")
             qppg_base_normalized = None
             if config.model.qppg_residual_enabled:
                 qppg_base_ms = batch.get("qppg_base_ms")
@@ -44,6 +46,8 @@ def evaluate_model(
                 batch["values"], batch["mask"], batch["jitter"], batch["device_id"], batch["accel"],
                 qppg_features=qppg_features if isinstance(qppg_features, torch.Tensor) else None,
                 qppg_base_normalized=qppg_base_normalized,
+                qppg_valid=qppg_valid if isinstance(qppg_valid, torch.Tensor) else None,
+                qppg_rmssd_residual_cap_normalized=qppg_rmssd_residual_cap_normalized,
                 compute_beat=beat_trained,
             )
             direct_ms = scaler.decode(outputs["direct_loc"])

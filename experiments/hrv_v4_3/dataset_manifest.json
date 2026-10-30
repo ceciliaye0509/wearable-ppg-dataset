@@ -1,0 +1,191 @@
+{
+  "dataset_name": "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029",
+  "dataset_version": "v4.3",
+  "candidate_windows": 14036,
+  "valid_ecg_label_windows": 10271,
+  "invalid_ecg_label_windows": 3765,
+  "protocol_sha256": "d39ea6d77a4f753824948ab25b77e08ab62c457a5cc8e1b67dfcb9b341ee95b8",
+  "checksums_sha256": "bcd593f655b52d6d0217a01d456b3cdb33382d91e09a2e7fbd8b3909ab23d0d0",
+  "total_transfer_bytes": 15181702085,
+  "files_sha256": {
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P1.npz": "2b9b107a76657e3f182473968ccb7c05224ca2778764db413383bb6ccf7ce9bd",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P10.npz": "f0e7f83c95a33f0e4a59eccc9c9d3066fc77c63b7876cfd2d630fbbaf2793a0e",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P11.npz": "f677ce2f38911903bd5b18753df57109c591e8cb4d6cb5eac3347c82520e6bf2",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P12.npz": "613ed821425012ebc3ea73e431ec2b4f87acc6ef200db94ac5d10c07fe903418",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P13.npz": "bdb204bd8907b5ef67618a6a672c7255d1b76bbfab995606a1b6cf54449e3d8f",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P15.npz": "3366861c47387d3918da1a8978da970304b58be049a66a4ddea8f9cf781a11e3",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P18.npz": "3ed211f48bdf057ff5c66dd9b98dd47e1c78df73a0ccc3d3fc32b8f48cfca466",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P19.npz": "3a2e3512a300cc26bfd7a83dcb1254e3c1442326305cee444e58d46f8fbdb61e",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P20.npz": "cdf9998fabb53aea284376072941c169e02a89c617a1158c2045b9bd12bf6d08",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P3.npz": "3a25741dd98f438c2669e0f7b940244ee9db3bf1fb891cdac258ea97faaeb063",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P4.npz": "9b453e8a709f117ae43ae1719b2b92eebc61d2e5c6914652ab5388af46e3363a",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P6.npz": "4d424b00227e626f4ae37c23558b4119dba14c0e2a960494782c60922e5fdcb0",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P7.npz": "d449f67dd6f0b2649d38d4ec2d844e3e21f3064af498d82cdfb7a1e144370377",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P8.npz": "5bbbb2a14e6d050f525636a6b8fa3334c38d0d59e11a907588a20e79cdfdb118",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_P9.npz": "c052a2562f20a39b73009b43c10725e483535a91cc4c1e3cf6155f1575c5e3da",
+    "annotation_source_snapshot_export12.json": "ea61e2c8ca15906452ae712dbfab70dbf9a733cfe7391c36668b5ca0e047f55e",
+    "integration_verification.json": "a2d35a5d95d76e49a56dc7bcffff7c6782c21db5a32c10de4fed5fa38e82d52e",
+    "latest_saved_manual_unreadable_intervals.csv": "ad7691e8164b2f48848448301e7a8946310ffd28722c87cb1cd521022025faf1",
+    "ecg_polarity_correction_intervals.csv": "ef36f000bd0630a722481947e7f44f364729fb9668525e91d16643b545559511",
+    "polarity_protocol.json": "7be0e1f01693654bacf48e04c3b26d4c7c1e9e472966b2b2c48cc87ec8bec2e3",
+    "ecg_polarity_flip_intervals.csv": "5a92c7781f5c3c287125a58453bfec2b5f8afa30ae5c857d7103ce7b03e6d8d0",
+    "baseline_six_channel_macro.csv": "7658199152a1191f51b67b95059277faaf716d7f8b0dd715ca9802507cf7ada8",
+    "manual_reference_supersession.json": "f582f7caa8e962ed22b5f2505884f5a718c4e4332fdf0a6995c5ca7b580c662d",
+    "config.json": "34115f6c1f5256b6f61d928f2a19b458948028230990a1e9649aae459293540b",
+    "baseline_freeze_recommendation.json": "ce6aeef2154565b05f6a103b5f3e1fa9c0ed0793c5431a163a19d2eb077fb6f1",
+    "manual_annotations_export12.csv": "7a127441c43a5eac421049025a76cfd962ed8845facdc2d0a680484a37882cf2",
+    "annotation_snapshot.json": "ba43c23c83b32f879cf1a733d92c7a0eb6ad59afabdad7b994a777d995bedb98",
+    "baseline_verification.json": "6daa01c82a60d754881fcf3015a129f6b342b2c2a38b9f99384e925ddfacac31",
+    "flip_intervals_with_reasons.csv": "5a92c7781f5c3c287125a58453bfec2b5f8afa30ae5c857d7103ce7b03e6d8d0",
+    "README.md": "d6eb9d029bac075280d9e42e5363bdcd492a66fcde71fdd59ad052dec1172532",
+    "baseline_train_acceptance.csv": "035faf0cd5e768d3408821331183ce96cfc84eab970af950aeeb6960a2ec21b3",
+    "random_audit_summary.json": "e6b81b0b40d0c5905c8847b102e05f8c0db2963e7df7e3faea1c59362a7da279",
+    "baseline_primary_scores.csv": "4ad953debfa6f28b15c0de24260455d047aa6920e0ee5a365846f246f5524fbc",
+    "minute_decisions_with_reasons.csv": "4ec36bedc8e0a77c96d408352df8a518d98d5e91ac48a20f18878bd6e7f504f1",
+    "research_joint_decision.json": "064277f5ce461d62cecbe412f6ef3570925ec427ba26a955d2e6a45727c6f434",
+    "ecg_reference_protocol.json": "d39ea6d77a4f753824948ab25b77e08ab62c457a5cc8e1b67dfcb9b341ee95b8",
+    "manual_short_RR_latest_review.json": "41701af75ff36c732176527573193eee64ccdf7a01eec9d4ef97385d39e23c84",
+    "ecg_label_audit.csv.gz": "d971b27cd82e9bfbe6774e4c2084edf013fff1f999c0e6ce31f472bfe81ead5d",
+    "manual_repair_protocol.json": "8345849f2d47009fcc421817ac7bf5e2d67ba8abd9853a90a39f11aae2f28b86",
+    "random_audit_clip_scores.csv": "cf91589b02cdb637de41b85c09fc6b4478dec704afba9984d62771fedc6c857c",
+    "manual_window_decisions.csv": "c2a12782b9cb19791036571634c09ea4c362bab645d4cf89b32f7c5a5366514c",
+    "manual_patch_ledger.json": "81e12b00ea6cfd58c6b145f77bd79a282e309e17381c89e759f8560477781522",
+    "manual_window_decisions.json": "56f7531befcc97f0a61ef3848f56dfcf5b8efbbccda1f60c2a7cf098d938bc73",
+    "baseline_by_channel.csv": "8a579e5289df52ef50948fb2fc58c58ec6bd5ac78580b491aad2dbab251c3ea1",
+    "synced_3device_rawaligned_training_v4_3_stride30_rawslots_fullmanual_export12_20261029_summary.csv": "3ab8d17913471e9871cf26e3b14d2f566039e3b56dfca91d245ad6197879240c",
+    "effective_manual_references.json": "69829d19fcc2b4ce04d7f1cd072d060956caa2b6bf4771b1322f8d803dd79208",
+    "baseline_independent_verification.json": "f0fd73f5ca241b76a50d70270313865fdf6fcfae086b9f689c4638eb802d513a",
+    "manual_full300_G1_exceptions/P18_48.npz": "7ef152ddafac0b38becd4cd3e9ef708ac7a4e188d437a5df1fee82945d62b57d",
+    "manual_full300_G1_exceptions/P4_563.npz": "2a3aee24729d26b9b8bd68ea2c798d12f497ff8a5a79ad85939ea8c77eda0ad4",
+    "manual_full300_G1_exceptions/protocol.json": "c3e8d625acb0354496b14fa33fed564ab40c872de1a3d973bdb2cc01a8bbd9f5",
+    "manual_full300_G1_exceptions/verification.json": "f87ab045bb9ce36b57788aa4d47dd4bbc21b70fe3afe54c6c6e8a1c943ec9bb5",
+    "manual_full300_G1_exceptions/verified_candidates.csv": "9c514c1e139fa8e8ddba55e424163e0cd355617001126c210dd54ac141d6b893",
+    "manual_full300_G1_exceptions/checksums.json": "8e09568dac00fe23e474d7a65187f8a30a0ff281404fe73392c8aceda4398539",
+    "manual_full300_G1_exceptions/P12_685.npz": "98e8ba0fe149829c72fecd3c5c21a0dadaa38d75aabc5bb822b1525e4901edf3",
+    "manual_full300_G1_exceptions/P9_723.npz": "5571bdc6aed5b0e7c726fe28b00f3400e1fbadf35e9ead88575d14d64e76da0d",
+    "dataset_freeze_manifest.json": "f3afbbf931db71d3274ba81be85d7fa4732274f66a66a4de50bacbcd519ad46f"
+  },
+  "participants": [
+    {
+      "participant": "P1",
+      "candidates": 865,
+      "valid": 778,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 778
+    },
+    {
+      "participant": "P10",
+      "candidates": 512,
+      "valid": 511,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 511
+    },
+    {
+      "participant": "P11",
+      "candidates": 226,
+      "valid": 217,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 217
+    },
+    {
+      "participant": "P12",
+      "candidates": 716,
+      "valid": 674,
+      "full300_manual_exceptions": 1,
+      "schema": true,
+      "model_input_eligible": 674
+    },
+    {
+      "participant": "P13",
+      "candidates": 361,
+      "valid": 327,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 327
+    },
+    {
+      "participant": "P15",
+      "candidates": 728,
+      "valid": 647,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 647
+    },
+    {
+      "participant": "P18",
+      "candidates": 1481,
+      "valid": 1151,
+      "full300_manual_exceptions": 1,
+      "schema": true,
+      "model_input_eligible": 1151
+    },
+    {
+      "participant": "P19",
+      "candidates": 726,
+      "valid": 567,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 567
+    },
+    {
+      "participant": "P20",
+      "candidates": 367,
+      "valid": 198,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 198
+    },
+    {
+      "participant": "P3",
+      "candidates": 3133,
+      "valid": 2484,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 2484
+    },
+    {
+      "participant": "P4",
+      "candidates": 1283,
+      "valid": 771,
+      "full300_manual_exceptions": 1,
+      "schema": true,
+      "model_input_eligible": 771
+    },
+    {
+      "participant": "P6",
+      "candidates": 1024,
+      "valid": 0,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 0
+    },
+    {
+      "participant": "P7",
+      "candidates": 625,
+      "valid": 468,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 468
+    },
+    {
+      "participant": "P8",
+      "candidates": 637,
+      "valid": 551,
+      "full300_manual_exceptions": 0,
+      "schema": true,
+      "model_input_eligible": 551
+    },
+    {
+      "participant": "P9",
+      "candidates": 1352,
+      "valid": 927,
+      "full300_manual_exceptions": 1,
+      "schema": true,
+      "model_input_eligible": 927
+    }
+  ],
+  "source_is_local_not_HF": true
+}

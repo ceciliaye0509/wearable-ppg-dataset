@@ -1,5 +1,9 @@
 # generate_rawaligned_4device_dataset.py 生成说明
 
+> 当前模型迁移使用已验收的完整v4.3数据，不通过本早期生成器重建标签。
+> 见[迁移说明](../../docs/hrv/WINDOWS_MODEL_HANDOFF.md)。下文描述本脚本的历史
+> 处理行为，与最新Rodrigues＋人工修复的发布协议有区别。
+
 ## 当前对应关系确认
 
 这份 README 对应当前脚本：
@@ -18,8 +22,9 @@
    - `accel_mean_mag`: 原始三轴加速度幅值均值。
    - `accel_motion_mean_mag`: 去重力后的 motion 幅值均值。
 8. 使用 `numpy.savez_compressed` 保存每个参与者的 `.npz`。
+9. ECG 先按 all-20 polarity manifest 纠正稳定负极性区间；只有整窗每个采样点均有直接确认的稳定极性、并通过严格 ECG QC 的窗口才会进入新建的可靠 ECG GT 数据集。
 
-因此，当前最终版 Hugging Face 数据集与脚本的对应关系是成立的；README 以当前脚本逻辑为准。
+已有 Hugging Face 历史数据集仍保留其生成时 cohort 和规则；下文新增的 polarity/QC all-20 版本使用独立名称，不能据此把旧数据集说成已按新规则重建。
 
 ---
 
@@ -43,6 +48,9 @@
 加载每个参与者的 Earring/Ring/Watch PPG 和 Polar ECG
   |
   v
+应用 all-20 ECG 极性清单：只翻转稳定负向区间；未分类/伪迹样本不进入 QC 合格窗口
+  |
+  v
 取所有设备和 ECG 的公共时间重叠区间
   |
   v
@@ -52,10 +60,7 @@
 检查 PPG 设备边界是否在 alignment_tolerance_sec 内
   |
   v
-对 ECG 窗口运行 NeuroKit2 Pan-Tompkins R-peak 检测
-  |
-  v
-执行 ECG 标签质控
+对已纠正的 ECG 跑 Pan-Tompkins 并执行 ECG 标签与信号质量 QC
   |
   v
 把 PPG green/IR 重采样到 target_fs 网格
@@ -79,10 +84,11 @@
 | 阶段 | 条件 | 说明 |
 |---|---|---|
 | 边界对齐 | 每个 PPG 设备在窗口起点和终点附近都有样本，偏移不超过 `alignment_tolerance_sec` | 避免某设备窗口头尾缺数据 |
-| ECG 标签质控 | `ecg_label_qc_pass == True` | 保证 ECG reference 可用 |
+| ECG 极性 | 窗内每个 ECG 采样点都属于直接确认的正/负稳定 polarity block | 负向稳定片段已按 manifest 翻转；未分类、伪迹或模糊区间拒绝 |
+| ECG 标签/信号质控 | `ecg_label_qc_pass == True` | 需满足振幅跨度 ≤ 5,000 µV、基线漂移 ≤ 1,500 µV、QRS-SQI ≥ 0.50，以及下方生理/QC 条件 |
 | PPG 采样覆盖 | 每个设备、每个通道的 `ppg_valid_sample_ratio >= min_valid_sample_ratio` | 当前最终版用 `0.90`，允许最多约 10% sample loss |
 
-PPG 派生质量指标不参与筛选，因为当前数据集不保存这些 baseline 派生信息。
+默认 cohort 是 P1–P20。若选定的 raw source 或 polarity block manifest 缺少任何一位参与者，生成器会在写输出前报错，而不是默默缩小 cohort。PPG 派生质量指标不参与筛选，因为当前数据集不保存这些 baseline 派生信息。
 
 ---
 
@@ -101,8 +107,12 @@ ECG 标签由窗口内 Polar ECG 原始信号产生。脚本使用 NeuroKit2 的
 | ECG IBI 校正比例 <= `DEFAULT_MAX_IBI_CORRECTION_RATIO` | `0.2` | `high_ecg_ibi_correction_ratio` |
 | 心率在 [`min_hr_bpm`, `max_hr_bpm`] | 默认 `[30, 200] bpm` | `ecg_hr_out_of_range` |
 | RMSSD <= `DEFAULT_MAX_RMSSD_MS` | `200 ms` | `ecg_rmssd_too_high` |
+| QRS-SQI >= `min_ecg_qrs_sqi` | `0.50` | `low_ecg_qrs_sqi` |
+| ECG 振幅跨度（p01–p99） | <= `5,000 µV` | `high_raw_ecg_amplitude_span` |
+| ECG 基线漂移（2 秒块中位数 p05–p95） | <= `1,500 µV` | `high_ecg_baseline_wander` |
+| 极性采样覆盖率 | 必须为 `1.0` | `unresolved_ecg_polarity` |
 
-注意：数据集中同时保存未校正的 `ecg_rr_intervals_ms` 和校正后的 `ecg_rr_intervals_corrected_ms`。
+注意：数据集中同时保存未校正的 `ecg_rr_intervals_ms` 和校正后的 `ecg_rr_intervals_corrected_ms`。当前 R 峰标签和 QRS-SQI 依赖 Pan-Tompkins 检测，因此自动 QC 通过只能标记候选 ECG，不能作为该算法或其他 detector 的无偏验证真值；算法比较必须使用同一批盲法人审确认的 R 峰窗口。选择胜出 detector 后，再生成最终标签。
 
 ---
 
@@ -147,8 +157,8 @@ accel_motion_mean_mag = mean(abs(m_t - gravity_reference))
 
 | 参数 | 默认值 | 当前最终版使用 | 说明 |
 |---|---:|---:|---|
-| `--participants` | `None` | 默认扫描 raw root 后排除指定参与者 | 可用逗号指定参与者 |
-| `--exclude` | `P2,P14,P16,P17` | `P2,P14,P16,P17` | 排除无效或不纳入最终版的参与者 |
+| `--participants` | `P1,...,P20` | `P1,...,P20` | 默认使用 20 位参与者原始数据；可用逗号指定子集 |
+| `--exclude` | 空 | 空 | 默认不排除参与者；只按窗口级极性和 QC 门槛筛选 |
 | `--devices` | `Earring,Ring,Watch` | `Earring,Ring,Watch` | 当前脚本只支持这 3 个设备 |
 | `--window-sec` | `300` | `300` | 5 分钟窗口 |
 | `--stride-sec` | `300` | strict: `300`; training: `60` 或 `30` | 窗口步长 |
@@ -158,6 +168,10 @@ accel_motion_mean_mag = mean(abs(m_t - gravity_reference))
 | `--max-source-gap-ms` | `500.0` | `500.0` | 重采样时最近原始样本的最大允许距离 |
 | `--ecg-min-valid-ibi-ratio` | `1.0` | `1.0` | ECG valid IBI ratio |
 | `--min-ecg-valid-sample-ratio` | `1.0` | `1.0` | ECG 有效采样覆盖率 |
+| `--min-ecg-qrs-sqi` | `0.50` | `0.50` | 最低 QRS 突出度/一致性分数 |
+| `--max-ecg-raw-span-uv` | `5000` | `5000` | 1–99 分位振幅跨度上限（µV）；超限窗口不作为 GT |
+| `--max-ecg-baseline-wander-uv` | `1500` | `1500` | 2 秒分块中位基线的 5–95 分位跨度上限（µV） |
+| `--polarity-intervals`, `--polarity-blocks` | all-20 manifest | all-20 manifest | 稳定极性区间及逐块极性分类结果 |
 | `--min-hr-bpm` | `30.0` | `30.0` | ECG 质控最低心率 |
 | `--max-hr-bpm` | `200.0` | `200.0` | ECG 质控最高心率 |
 | `--max-windows` | `None` | `None` | 调试用窗口数量限制 |
@@ -222,7 +236,7 @@ README.md
 | `ecg_ibi_correction_ratio` | `(N,) float32` | ECG IBI 校正比例 |
 | `ecg_qc_pass`, `ecg_label_qc_pass` | `(N,) bool` | ECG 质控是否通过 |
 | `ecg_qc_reason`, `ecg_label_qc_reason` | `(N,) object` | ECG 质控原因 |
-| `ecg_qrs_sqi` | `(N,) float32` | 简单 ECG QRS 质量分数 |
+| `ecg_qrs_sqi` | `(N,) float32` | 基于 cleaned ECG 与 Pan-Tompkins R 峰的 QRS 突出度/一致性分数 |
 | `ecg_peak_count` | `(N,) int32` | R-peak 数量 |
 | `ecg_hr_bpm` | `(N,) float32` | ECG 心率 |
 | `ecg_rr_cv` | `(N,) float32` | RR coefficient of variation |
@@ -273,7 +287,44 @@ stride 60 数据集在 Hugging Face 上保留，本地副本之前已删除以�
 
 ## 运行示例
 
-### strict reference: stride 300
+### 先生成/更新 20 人 polarity manifest
+
+极性纠正发生在数据集生成和 ECG detector 算法比较之前。原始 `.npz` 不会被改写；负向的稳定区间只在内存中翻转，伪迹、模糊极性和未分类区间不会翻转，也不会进入可靠 GT 窗口。
+
+```bash
+/Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python \
+  /Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/correct_ecg_polarity.py \
+  --raw-root /path/to/Multisite-PPG/raw_data \
+  --out-dir /Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/outputs/ecg_polarity_correction_all20_v1 \
+  --participants P1 P2 P3 P4 P5 P6 P7 P8 P9 P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20
+```
+
+### 生成新版本 ECG QC 候选集（20 人默认输入）
+
+不要复用旧数据集名称，以免覆盖历史数据。QC 门槛会拒绝未能逐样本确认极性的窗口、振幅跨度超过 5,000 µV、基线漂移超过 1,500 µV、QRS-SQI 低于 0.50，以及未通过原有 IBI/HR/RMSSD 检查的窗口。通过自动门槛的 ECG 标签仍需盲法人工审计，不能直接宣称为最终可靠 GT。
+
+```bash
+/Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python \
+  /Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/prepare_windowed_dataset/generate_rawaligned_4device_dataset.py \
+  --dataset-name rawaligned_ecg_gt_polarityqc_all20_v1 \
+  --raw-root /path/to/Multisite-PPG/raw_data \
+  --participants P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11,P12,P13,P14,P15,P16,P17,P18,P19,P20 \
+  --exclude "" \
+  --devices Earring,Ring,Watch \
+  --target-fs 100.0 \
+  --window-sec 300 \
+  --stride-sec 300 \
+  --min-valid-sample-ratio 0.90 \
+  --ecg-min-valid-ibi-ratio 1.0 \
+  --min-ecg-valid-sample-ratio 1.0 \
+  --min-ecg-qrs-sqi 0.50 \
+  --max-ecg-raw-span-uv 5000 \
+  --max-ecg-baseline-wander-uv 1500
+```
+
+以下历史命令/数据集名对应旧 cohort；不要用这些旧名称重新生成，避免把历史数据覆盖或与新 QC 规则混淆。需要重建时使用上方的新名称，并明确 polarity manifest。
+
+### 历史 strict reference: stride 300（仅供追溯）
 
 ```bash
 /Users/jiqiyu/Desktop/Daily_HRV/venv/bin/python \

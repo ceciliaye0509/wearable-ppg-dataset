@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>ECG Direction Comparison</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/comparison.css"><script src="/comparison.js" defer></script></head>
+<body><main class="shell">
+  <header><div><p class="eyebrow">PAIRED DIRECTION REVIEW · DISAGREEMENT SAMPLE</p><h1>Which result fits the ECG better?</h1></div><nav><span id="reviewer"></span><a class="button" href="http://127.0.0.1:8767/">New direction labeling</a><a class="button" href="/legacy/">Previous direction audit</a><a class="button" href="/api/comparison/export.csv">Export choices (A/B)</a></nav></header>
+  <p class="intro"><strong>Historical workspace — earlier choices are excluded from the current benchmark.</strong> <a href="http://127.0.0.1:8767/">Open the new waveform-only direction labeling page.</a> The earlier disagreement tasks remain available as an archive.</p>
+  <p id="startup-error" class="error" role="alert" hidden></p>
+  <div class="layout"><aside><h2>Participants</h2><p id="overall" class="muted"></p><p class="muted">Choose anyone. Fewer than 8 eligible minutes means all are included.</p><div id="participants"></div></aside>
+    <section class="workspace"><div id="empty"><h2>Select a participant</h2><p>Participants with no eligible disagreements are shown but cannot be selected.</p></div>
+      <div id="panel" hidden>
+        <div class="section-head"><div><h2 id="participant-title"></h2><p id="progress" class="muted"></p></div><span class="badge">Same raw ECG · no sign flip · no peak edits</span></div>
+        <div id="tasks" class="task-list" aria-label="Sampled disagreement minutes"></div><p id="task-label" class="muted"></p>
+        <div class="plot-controls paired-controls"><strong id="view-label">Full minute</strong><div><button id="minute">Full minute</button><button id="detail">5-second detail</button><button id="prev">← 5 sec</button><button id="next">5 sec →</button><button id="toggle-votes">Hide vote marks</button></div></div>
+        <div class="comparison-grid">
+          <article class="method-card" aria-label="Method A"><h2>Method A</h2><p id="result-A" class="direction-result"></p><p id="action-A" class="muted"></p><canvas id="plot-A" width="1000" height="340" aria-label="Raw ECG with Method A direction vote locations"></canvas><p id="stats-A" class="method-stats"></p></article>
+          <article class="method-card" aria-label="Method B"><h2>Method B</h2><p id="result-B" class="direction-result"></p><p id="action-B" class="muted"></p><canvas id="plot-B" width="1000" height="340" aria-label="Same raw ECG with Method B direction vote locations"></canvas><p id="stats-B" class="method-stats"></p></article>
+        </div>
+        <p class="legend"><span class="positive">● Upward vote</span><span class="negative">● Downward vote</span><span class="uncertain">● Uncertain vote</span> · Identical time and amplitude scales in both panels.</p>
+        <p class="muted hint">Dot colors describe each method's internal direction votes, not necessarily the sign of the raw sample. They are not verified R peaks. More votes do not mean better results. Rate the whole minute; use the synchronized 5-second views for detail. No waveform is flipped here.</p>
+        <fieldset id="choices"><legend>Your comparison — choose one</legend>
+          <label class="choice"><input type="radio" name="preference" value="A"> A fits better</label>
+          <label class="choice"><input type="radio" name="preference" value="B"> B fits better</label>
+          <label class="choice"><input type="radio" name="preference" value="same"> Both equally reasonable</label>
+          <label class="choice"><input type="radio" name="preference" value="neither"> Neither is reasonable</label>
+          <label class="choice"><input type="radio" name="preference" value="unsure"> Cannot judge</label>
+        </fieldset>
+        <div class="notes-row"><label>Confidence<select id="confidence"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></label><label class="notes">Notes (optional)<textarea id="notes" maxlength="2000" rows="2" placeholder="E.g. missed QRS, extra non-QRS votes, mixed direction, or unreadable interval."></textarea></label></div>
+        <div class="save-row"><span id="message" role="status">Not yet saved</span><div><button id="restore">Restore saved choice</button><button id="save">Save as in progress</button><button id="complete" class="primary">Complete minute →</button></div></div>
+      </div>
+    </section>
+  </div><footer>Preferences are saved separately. Previous direction ratings, peak annotations, and active polarity corrections are unchanged. This sample represents eligible disagreements only.</footer>
+</main>
+<dialog id="login"><form id="login-form"><p class="eyebrow">PRIVATE REVIEW WORKSPACE</p><h2>Sign in</h2><label>Reviewer name<input id="name" maxlength="64" autocomplete="name" required></label><label>Access code<input id="code" type="password" autocomplete="current-password" required></label><p id="login-error" class="error" role="alert"></p><button class="primary" type="submit">Enter comparison</button></form></dialog>
+</body></html>

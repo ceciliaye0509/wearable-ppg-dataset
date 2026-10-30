@@ -1,5 +1,10 @@
 # `ml_hrv`
 
+For the current v4.3 colleague-matched Kazemi model handoff, start with
+[the Windows model guide](../../docs/hrv/WINDOWS_MODEL_HANDOFF.md). This package
+preserves the earlier raw-slot/direct-HRV research track; its historical folds,
+caches, scalers, and scores are not the new colleague-comparison run.
+
 `ml_hrv` is the raw-slot continuous HRV track. It lives beside the partner
 `model_baselines` package and does not alter that code.
 

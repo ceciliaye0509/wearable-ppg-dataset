@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>ECG Direction Audit</title><link rel="stylesheet" href="styles.css"><script src="app.js" defer></script></head>
+<body><main class="shell">
+  <header><div><p class="eyebrow">ALGORITHM-ASSISTED HUMAN REVIEW</p><h1>ECG direction audit</h1></div><div><span id="reviewer"></span><a class="button" href="/api/export.csv">Export ratings &amp; peaks</a></div></header>
+  <p class="intro"><strong>Historical direction audit — these earlier ratings are excluded from the current benchmark.</strong> <a href="http://127.0.0.1:8767/">Open the new waveform-only direction labeling page.</a> Saved ratings and peak marks remain available in this archive.</p>
+  <p id="startup-error" class="error" hidden></p>
+  <div class="layout"><aside><h2>Participants</h2><p class="muted">Choose anyone to start or continue.</p><div id="participants"></div></aside>
+    <section class="workspace"><div id="empty"><h2>Select a participant</h2><p>Participants without a direction alert have no sampled minutes in this audit.</p></div>
+      <div id="panel" hidden><div class="section-head"><div><h2 id="participant-title"></h2><p id="progress" class="muted"></p></div><span class="badge">Raw ECG · no polarity flip</span></div>
+        <div id="tasks" class="task-list" aria-label="Sampled minutes"></div><p id="task-label" class="muted"></p>
+        <div class="plot-card"><div class="plot-controls"><span id="focus-label">Focus minute: 0–60 seconds</span><div><button id="minute">Full minute</button><button id="context">With context</button><button id="prev">← 5 sec</button><button id="next">5 sec →</button></div></div>
+          <div class="assistance-controls"><button id="use-suggestions">Restore algorithm suggestions</button><button id="restore-peaks">Restore last saved marks</button><button id="toggle-peaks">Hide peak marks</button><span id="peak-count"></span></div>
+          <p id="assistance-notice" class="muted"></p><canvas id="plot" width="1200" height="380" aria-label="Original raw ECG waveform with editable candidate QRS marks"></canvas>
+          <p class="muted">Orange = unverified algorithm marks; red = manual/edited or reviewer-checked marks. Color alone does not establish verification; check the status below. In a 5-second view, click a mark to remove it or click the waveform to add a mark. Context is reference only; mark and rate the focus interval.</p>
+          <label class="peak-verification"><input id="peaks-reviewed" type="checkbox"> I have checked the current peak marks (including missing and extra beats).</label></div>
+        <div class="questions"><label>1. Can QRS timing be identified reliably?<select id="qrs"><option value="">Choose an assessment…</option><option value="readable">Readable throughout</option><option value="partially_readable">Partially readable</option><option value="unreadable">Unreadable throughout</option><option value="unsure">Unsure — needs adjudication</option></select><small>Assess whether individual QRS events can be located, regardless of their direction.</small></label>
+          <div><label>2. Can a consistent dominant QRS direction be determined?<select id="determinability"><option value="">Choose an assessment…</option><option value="yes">Yes</option><option value="no">No — direction not determinable</option><option value="unsure">Unsure — needs adjudication</option></select></label><label class="direction-label">If yes, which direction?<select id="direction" disabled><option value="undetermined">Choose a direction…</option><option value="positive">Predominantly upward</option><option value="negative">Predominantly downward</option></select></label></div>
+        </div>
+        <div class="notes-row"><label>Confidence<select id="confidence"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></label><label class="notes">Notes (optional)<textarea id="notes" maxlength="2000" rows="2" placeholder="If partially readable, note uncertain time intervals within the focus minute (0–60 sec)."></textarea></label></div>
+        <div class="save-row"><span id="message" role="status">Not yet saved</span><div><button id="save">Save as in progress</button><button id="complete" class="primary">Complete minute →</button></div></div>
+      </div>
+    </section></div><footer>Research review · Ratings are stored separately from your existing peak annotations.</footer>
+</main>
+<dialog id="login"><form id="login-form"><p class="eyebrow">PRIVATE AUDIT WORKSPACE</p><h2>Sign in</h2><label>Reviewer name<input id="name" maxlength="64" autocomplete="name" required></label><label>Access code<input id="code" type="password" autocomplete="current-password" required></label><p id="login-error" class="error" role="alert"></p><button class="primary" type="submit">Enter audit</button></form></dialog>
+</body></html>

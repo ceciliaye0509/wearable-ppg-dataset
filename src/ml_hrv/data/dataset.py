@@ -15,7 +15,7 @@ from ml_hrv import DEVICE_NAMES
 from ml_hrv.physiology import reference_hrv_from_rpeaks
 
 from .staging import robust_stats_filename
-from .qppg import QPPGFeatureScaler, load_qppg_rows
+from .qppg import QPPGFeatureScaler, QPPGRMSSDCalibrator, load_qppg_rows
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,7 @@ class RawslotWindowDataset(Dataset):
         ppg_channels: Iterable[str] = ("green", "ir"),
         qppg_feature_csv: str | Path | None = None,
         qppg_feature_scaler: QPPGFeatureScaler | None = None,
+        qppg_rmssd_calibrator: QPPGRMSSDCalibrator | None = None,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.participants = tuple(participants)
@@ -67,6 +68,7 @@ class RawslotWindowDataset(Dataset):
         self.use_precomputed_stats = use_precomputed_stats
         self.qppg_rows = load_qppg_rows(qppg_feature_csv) if qppg_feature_csv else None
         self.qppg_feature_scaler = qppg_feature_scaler
+        self.qppg_rmssd_calibrator = qppg_rmssd_calibrator
         if accel_mode not in {"none", "scalar"}:
             raise ValueError("Phase-one dataset supports accel_mode none/scalar")
 
@@ -133,6 +135,21 @@ class RawslotWindowDataset(Dataset):
         if self.qppg_rows is not None and scaler is None:
             raise ValueError("qPPG feature CSV requires a train-fitted scaler")
         self.qppg_feature_scaler = scaler
+
+    def fit_qppg_rmssd_calibrator(self) -> QPPGRMSSDCalibrator:
+        """Fit qPPG RMSSD calibration from this (training) participant split only."""
+        if self.qppg_rows is None or len(self.channel_names) != 1:
+            raise ValueError("RMSSD qPPG calibration requires one-channel qPPG data")
+        rows: list[dict[str, str]] = []
+        targets: list[float] = []
+        for ref in self.refs:
+            rows.append(self.qppg_rows[(ref.participant, ref.window_index, DEVICE_NAMES[ref.device_index], self.channel_names[0])])
+            targets.append(float(self._metadata[ref.participant]["ecg_rmssd_corrected_ms"][ref.window_index]))
+        self.qppg_rmssd_calibrator = QPPGRMSSDCalibrator.fit(rows, targets)
+        return self.qppg_rmssd_calibrator
+
+    def set_qppg_rmssd_calibrator(self, calibrator: QPPGRMSSDCalibrator | None) -> None:
+        self.qppg_rmssd_calibrator = calibrator
 
     def __len__(self) -> int:
         return len(self.refs)
@@ -291,6 +308,8 @@ class RawslotWindowDataset(Dataset):
                 raise ValueError("qPPG residual ablation requires exactly one raw PPG channel")
             row = self.qppg_rows[(ref.participant, ref.window_index, DEVICE_NAMES[ref.device_index], self.channel_names[0])]
             qppg_features, qppg_base_ms = self.qppg_feature_scaler.transform(row)
+            if self.qppg_rmssd_calibrator is not None:
+                qppg_base_ms[0] = self.qppg_rmssd_calibrator.calibrated_base_ms(row)
             result.update(
                 qppg_features=torch.from_numpy(qppg_features),
                 qppg_base_ms=torch.from_numpy(qppg_base_ms),

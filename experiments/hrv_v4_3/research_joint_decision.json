@@ -1,0 +1,77 @@
+{
+  "status": "five_current_research_questions_disposition_complete_next_container_ready",
+  "parent_dataset_version": "v4.2",
+  "parent_dataset_dir": "/Users/jiqiyu/Desktop/Daily_HRV/analysis/ecg_training_release_v4_2_20261029_v1/dataset/synced_3device_rawaligned_training_v4_2_stride30_rawslots_manualrepair_polarity_20261029",
+  "parent_protocol_sha256": "536b3139fe9cc1943816b8c8ca2f6de2b90be1b884a1b1be1bfaa49312c50717",
+  "source_export_sha256": "7a127441c43a5eac421049025a76cfd962ed8845facdc2d0a680484a37882cf2",
+  "R7": {
+    "disposition": "Retain inclusive300..2000ms as a conservative full300s corrected-NN-proxy training eligibility gate; never use it to delete human peaks or declare a QRS false.",
+    "latest_P3_saved_intervals_ms": [
+      223.0,
+      292.0,
+      192.5
+    ],
+    "latest_P9_saved_intervals_under300": [],
+    "human_short_RR_reference_preserved": true,
+    "universal_optimum_proven": false,
+    "reason": "Rechecked P3 proves the gate can exclude human-readable measured intervals.250ms still excludes192.5/223ms and would admit233 otherwise unvalidated windows; no basis for automatic global widening. The P3 full300 context also retains an unreadable tail outside the reviewed crop and severe G1 artifact. Do not invent a new lower bound from one selected case.",
+    "upper_result": "2000->2500ms changes no current complete-QC eligibility; no otherwise source-eligible long-RR case, so upper optimality is untested."
+  },
+  "R3": {
+    "disposition": "Complete the predeclared initial28-excerpt representative audit; no added annotation batch required for this closeout.",
+    "participants": 14,
+    "clips": 28,
+    "seconds": 560,
+    "reference_peaks": 754,
+    "TP20": 754,
+    "FN20": 0,
+    "FP20": 0,
+    "weighted_miss_fraction": 0.0,
+    "weighted_extra_per_minute": 0.0,
+    "any_error_20s_clip_fraction95_conservative_interval": [
+      0.0,
+      0.3201902968304672
+    ],
+    "limits": "Observed zero errors is not zero population error. The interval is for20s clip-error prevalence, not beat errors;14 participants/one draw per stratum limit precision. Whole300s HRV is not manually certified."
+  },
+  "R5": {
+    "disposition": "Keep global5000uV; adopt only four exact full300 human verified G1 exceptions in the next version, never adjacent windows.",
+    "full300_exception_candidates": 4,
+    "verification": "/Users/jiqiyu/Desktop/Daily_HRV/analysis/ecg_current_questions_20261029_v1/followup_01/manual_G1_exception_candidates/verification.json"
+  },
+  "R6": {
+    "disposition": "Keep fixed corrected NN proxy as declared primary; observed RR is mandatory secondary on identical windows. Statistical replacements do not establish corrected clinical NN truth."
+  },
+  "R4": {
+    "disposition": "Existing-waveform closeout under explicit user scope; no physical-switch validation claim.",
+    "user_scope": "没有，按现有波形证据给出结论并保留验证限制",
+    "direction_review_P3_updated": false,
+    "direction_review_P3_current_answer": "unreadable; no new direction rating in live DB",
+    "short_RR_P3_updated": true
+  },
+  "effective_manual_interval_records": 137,
+  "raw_export_interval_records": 138,
+  "explicit_partial_reference_overrides": 2,
+  "G2_boolean_changed_windows": 0,
+  "G2_changes_alone_new_accepted": 0,
+  "new_manual_exception_windows": 4,
+  "next_container": {
+    "candidate_windows": 14036,
+    "valid_windows": 10271,
+    "invalid_windows": 3765,
+    "old_valid_windows": 10267,
+    "new_rejections": 0,
+    "old97_repairs_retained": true,
+    "old7_rejections_retained": true,
+    "polarity_negative_minutes": 2717,
+    "polarity_flip_intervals": 34
+  },
+  "next_actions": [
+    "Package new independent full dataset with four verified manual exceptions and export12 effective-reference supersession; do not overwritev4.2.",
+    "Verify full HRV, all non-ECG member bytes, old masks/history and per-window manual provenance.",
+    "E4: same PPG predictions,9 heuristic candidates, original acceptance protocol, corrected primary and observed-RR secondary."
+  ],
+  "current_dataset_updated": false,
+  "HF_uploaded": false,
+  "model_training_started": false
+}

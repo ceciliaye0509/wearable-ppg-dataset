@@ -57,6 +57,8 @@ class RawContinuousHRVModel(nn.Module):
         accel: torch.Tensor | None = None,
         qppg_features: torch.Tensor | None = None,
         qppg_base_normalized: torch.Tensor | None = None,
+        qppg_valid: torch.Tensor | None = None,
+        qppg_rmssd_residual_cap_normalized: float | None = None,
         compute_beat: bool = True,
     ) -> dict[str, torch.Tensor]:
         tokens, local, coverage = self.encoder(values, mask, jitter)
@@ -65,10 +67,26 @@ class RawContinuousHRVModel(nn.Module):
         if self.config.model.qppg_residual_enabled:
             if qppg_base_normalized is None:
                 raise ValueError("qPPG residual model requires a normalized qPPG base prediction")
-            direct_loc = qppg_base_normalized + direct_loc
+            direct_delta = direct["loc"]
+            if self.config.model.qppg_rmssd_calibration_enabled:
+                if qppg_valid is None or qppg_rmssd_residual_cap_normalized is None:
+                    raise ValueError("RMSSD qPPG residual requires valid gate and train-only cap")
+                # RMSSD only: invalid qPPG windows retain the train-median
+                # fallback exactly; valid windows receive a bounded log-space
+                # correction.  SDNN is not trained in this ablation.
+                direct_delta = direct_delta.clone()
+                direct_delta[:, 0] = (
+                    qppg_valid.reshape(-1)
+                    * float(qppg_rmssd_residual_cap_normalized)
+                    * torch.tanh(direct_delta[:, 0])
+                )
+                direct_delta[:, 1] = 0.0
+            direct_loc = qppg_base_normalized + direct_delta
+        else:
+            direct_delta = direct["loc"]
         outputs = {
             "direct_loc": direct_loc,
-            "direct_delta": direct["loc"],
+            "direct_delta": direct_delta,
             "direct_logvar": direct["logvar"],
             "segment_coverage": coverage,
         }

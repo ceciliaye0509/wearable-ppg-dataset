@@ -1,0 +1,134 @@
+[
+  {
+    "name": "fold_0",
+    "train": [
+      "P1",
+      "P10",
+      "P13",
+      "P15",
+      "P18",
+      "P19",
+      "P4",
+      "P8",
+      "P9"
+    ],
+    "val": [
+      "P7",
+      "P12"
+    ],
+    "test": [
+      "P3",
+      "P11",
+      "P20"
+    ],
+    "eligible_windows": {
+      "train": 6230,
+      "val": 1142,
+      "test": 2899
+    },
+    "model_input_eligible_windows": {
+      "train": 6230,
+      "val": 1142,
+      "test": 2899
+    }
+  },
+  {
+    "name": "fold_1",
+    "train": [
+      "P11",
+      "P12",
+      "P19",
+      "P20",
+      "P3",
+      "P4",
+      "P8",
+      "P9"
+    ],
+    "val": [
+      "P10",
+      "P15"
+    ],
+    "test": [
+      "P18",
+      "P1",
+      "P13",
+      "P7"
+    ],
+    "eligible_windows": {
+      "train": 6389,
+      "val": 1158,
+      "test": 2724
+    },
+    "model_input_eligible_windows": {
+      "train": 6389,
+      "val": 1158,
+      "test": 2724
+    }
+  },
+  {
+    "name": "fold_2",
+    "train": [
+      "P1",
+      "P10",
+      "P11",
+      "P12",
+      "P13",
+      "P18",
+      "P20",
+      "P3",
+      "P7"
+    ],
+    "val": [
+      "P4",
+      "P8"
+    ],
+    "test": [
+      "P9",
+      "P15",
+      "P19"
+    ],
+    "eligible_windows": {
+      "train": 6808,
+      "val": 1322,
+      "test": 2141
+    },
+    "model_input_eligible_windows": {
+      "train": 6808,
+      "val": 1322,
+      "test": 2141
+    }
+  },
+  {
+    "name": "fold_3",
+    "train": [
+      "P1",
+      "P11",
+      "P15",
+      "P18",
+      "P20",
+      "P3",
+      "P7",
+      "P9"
+    ],
+    "val": [
+      "P13",
+      "P19"
+    ],
+    "test": [
+      "P4",
+      "P12",
+      "P8",
+      "P10"
+    ],
+    "eligible_windows": {
+      "train": 6870,
+      "val": 894,
+      "test": 2507
+    },
+    "model_input_eligible_windows": {
+      "train": 6870,
+      "val": 894,
+      "test": 2507
+    }
+  }
+]
