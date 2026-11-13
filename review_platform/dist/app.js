@@ -9,7 +9,7 @@ function saveStatus(message,error=false){$('#save-status').textContent=message;$
 function run(fn){return async(...args)=>{try{await fn(...args);}catch(e){notice(e.message||'Operation failed.',true);console.error(e.name+': '+e.message);}};}
 function needReviewer(){const r=$('#reviewer').value.trim();if(!C.id(r))throw Error('Enter a valid reviewer name using letters, numbers, periods, underscores or hyphens.');return r;}
 async function openFiles(files,handle=null){
-  if(S.busy)throw Error('Validation in progress. Please wait.');S.busy=true;$('#import-status').textContent='Checking the package and waveforms locally…';$('#import-status').className='';
+  if(files.some(f=>f.name==='history_manifest.json')){await ECGHistory.open(files);return;}if(S.busy)throw Error('Validation in progress. Please wait.');S.busy=true;$('#import-status').textContent='Checking the package and waveforms locally…';$('#import-status').className='';
   try{
     const reviewer=needReviewer(),books=files.filter(f=>f.name.endsWith('.ecgreview'));if(books.length!==1)throw Error('The folder must contain exactly one .ecgreview file.');
     const bookFile=books[0];if(bookFile.size>C.MAX_META)throw Error('Package metadata exceeds the 25 MB limit.');
