@@ -2,6 +2,13 @@
 
 正式代码保留两条独立流程：**HF raw-slot v1** 和 **v4.6 segment250**。两者只共享无版本含义的数值/IO工具；生成阶段均从原始 PPG、ECG 计算窗口，不读取另一版本的数据集。
 
+## ECG annotation website (Cloudflare Pages)
+
+The maintained review website is [`review_platform/`](review_platform/README.md).
+Deploy its `dist/` folder to Cloudflare Pages. It reads ZIP packages entirely in the browser,
+including historical annotation browsing and reviewer-scoped editing/export.
+Research waveforms, annotations, package ZIPs and credentials are not committed here.
+
 ## 目录
 
 ```text

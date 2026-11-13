@@ -63,3 +63,9 @@ src/model_baselines/supervised/.ipynb_checkpoints/
 /outputs/
 /data/
 *.egg-info/
+# Private ECG annotation packages and browser QA artifacts
+/review_platform/private_packages/
+/review_platform/qa/
+/review_platform/history_package/
+*.ecgreview
+*.ecgprogress
