@@ -1,248 +1,70 @@
-# Multi-site PPG: An In-the-Wild Physiological Dataset from Emerging Multi-site Wearables
+# Wearable PPG HRV
 
-**Current HRV research handoff (v4.3, 2026-10-30):** start with
-[the project map and Windows migration guide](docs/hrv/WINDOWS_MODEL_HANDOFF.md).
-The verified local v4.3 ECG dataset is transferred separately from Git; the
-historical Hugging Face downloads below do not contain this release.
-The model comparison configuration is prepared for M1 adaptation, not yet a
-completed training run.
+正式代码保留两条独立流程：**HF raw-slot v1** 和 **v4.6 segment250**。两者只共享无版本含义的数值/IO工具；生成阶段均从原始 PPG、ECG 计算窗口，不读取另一版本的数据集。
 
-## Quick Start
+## 目录
 
-This repository provides baselines for heart rate estimation from PPG signals collected across four wearable sites (ring, earring, necklace, watch) in an in-the-wild setting. You can run heuristic baselines, supervised deep learning baselines, or optionally re-prepare the windowed dataset with a different window size.
-
-- **Dataset** is available on [HuggingFace](https://huggingface.co/datasets/snowballlab/Multisite-PPG).
-- **Data download and preprocessing code** is included in this repository.
-
-
-## Installation
-
-Run 
-```bash
-pip install huggingface_hub
-```
-in your terminal if you don't have it installed yet. If it doesn’t allow you to install due to “error: externally-managed-environment,” you can override this, at the risk of breaking your Python installation or OS, by passing 
-```bash
-pip install huggingface_hub --break-system-packages
+```text
+src/hrv/
+  common/       切窗、raw-slot、IO、RR、qppg与评估工具
+  hf_rawslot/   HF早期版本：generate / baseline / model
+  v46/          v4.6：generate / PPG分段 / ECG / baseline / model
+src/model_baselines/  其他作者的模型，原路径、原内容和文件名保留
+configs/v46_reference/ 人工修复、源极性及排除记录；不是旧版窗口或自动标签缓存
 ```
 
-Then, clone our repo locally:
-```bash
-git clone https://github.com/jiayimaggieshao/wearable-ppg-dataset.git
-cd wearable-ppg-dataset
+自己的模型和未定稿研究位于仓库外 `../research_workspace/`；一天 ECG/活动变化等记录在其 `supplementary_experiments/`。旧 `rawaligned` 生成入口已退出正式源码，其必要数值函数已提取到 `common/`。数据集名称中的历史 `rawaligned` 字样保留，避免改坏已有文件身份。
+
+## 运行
+
+在仓库根目录安装 `pip install -e '.[model]'`，或设置 `PYTHONPATH=src`。原始数据需使用对应版本记录的源文件；v4.6参考极性操作绑定 HF `snowballlab/Multisite-PPG` 的提交 `126068a2b550a935d3503d15169f79c3dd02c368`，不能任意替换成极性状态不同的原始数据。
+
+### HF raw-slot v1
+
+```sh
+python -m hrv.hf_rawslot.generate \
+  --raw-root /path/to/raw_data \
+  --dataset-name synced_3device_rawaligned_training_v1_stride30_rawslots \
+  --out-dir /path/to/hf_rawslot
+python -m hrv.hf_rawslot.baseline --dataset-dir /path/to/hf_rawslot --output-dir /path/to/results/hf
 ```
 
-## Download Dataset
+该生成器取自 `bcf9cf4` 发布时期：300s/stride30/100Hz，原始槽位容差5ms、覆盖率90%，Pan-Tompkins ECG-QC参与窗口筛选，默认排除 P2/P14/P16/P17，**不排除P5**。它不同于后来的 Pan-ungated 工作区版本。原始数据若不同于当时发布源，不能仅凭代码相同声称逐字节复现。
 
-### for only sample data
-```bash
-python -c '
-from huggingface_hub import snapshot_download
-snapshot_download(
-    repo_id="snowballlab/Multisite-PPG",
-    repo_type="dataset",
-    local_dir="Multisite-PPG",
-    allow_patterns="sample_data/*"
-)
-'
+模型仍使用同事原代码，参数原样转发：
+
+```sh
+python -m hrv.hf_rawslot.model --task peak --device_name earring \
+  --peak_backbone kazemi --data_dir /path/to/hf_rawslot
 ```
 
-### for all 20 participant data
-```bash
-python -c "
-from huggingface_hub import snapshot_download
-snapshot_download(
-    repo_id='snowballlab/Multisite-PPG',
-    repo_type='dataset',
-    local_dir='Multisite-PPG'
-)
-"
+### v4.6
+
+```sh
+python -m hrv.v46.generate --raw-root /path/to/raw_data --output-dir /path/to/v46
+python -m hrv.v46.baseline --dataset-dir /path/to/v46 --output-dir /path/to/results/v46
+python -m hrv.v46.model eval --dataset-dir /path/to/v46 --output-dir /path/to/results/model \
+  --folds /path/to/folds.json --checkpoint-dir /path/to/checkpoints --decoder-dir /path/to/decoders
 ```
 
-After downloading your dataset, put **`wearable-ppg-dataset`** (the repo from GitHub) and **`Multisite-PPG`** (the folder created by `snapshot_download` from HuggingFace) **in the same parent folder**. Don’t move or rename anything inside them—the runner finds the data automatically.
+固定300s/stride30/100Hz。用原始未增强PPG计算公共时间窗、边界与90%槽位覆盖，之后才做源QC、最多250ms插值和长缺口分段；新边界保护3s，禁止跨片段构造RR。模型按片段处理，在一个原窗口内归一化，训练与解码共享有效区。观察不足标记默认仅供复查。
 
+ECG从原始信号重新检测：Rodrigues2021、局部50ms、受保护启动上下文、固定G0/G1/G2和RR规则。参考输入保留明确批准的人审锚点修复、四个整窗例外和拒绝决定，按绝对时间匹配，不扩大人审范围。
 
-## Running Experiments
+v4.6以每32窗一个NPZ分片保存，减少一次性内存；`dataset_manifest.json`列出分片。不要用旧整窗loader直接读取，应使用本版本的入口。`--limit`可作小规模检查，`--window-start-ms`可重建指定绝对时间窗口。HF版本仍保持原参与者NPZ格式。
 
+分段训练适配器也可用 `python -m hrv.v46.model train ... --folds ...`，只在train更新、val选模，不在test调参。此为新训练，不代表旧权重已重训完成。自己的研究模型入口见 `../research_workspace/models/mymodel.py`。
 
-> **Where to find your results.** Each step writes its outputs into a folder inside its own directory, organized per participant (e.g. `P7/`, `P8/`):
-> - §1 Heuristic baselines → `src/heuristic_baselines/outputs/`
-> - §2 Supervised baselines → `src/model_baselines/results/` (and `src/model_baselines/results_summary/` for multi-site sweeps)
-> - §3 Windowed dataset prep → `src/prepare_windowed_dataset/outputs/`
+## 验证与边界
 
-### 1. Run Heuristic Baselines
+`python -m unittest discover -s tests` 检查切窗与版本依赖、缺口和RR邻接、masked loss及HF发布口径。迁移时固定源样例的数值对照记录见 `docs/RESTRUCTURE_VERIFICATION.json`。
 
-All commands below are run from `wearable-ppg-dataset/src/heuristic_baselines/`:
+重构保持原科学规则；新的独立生成流程已进行固定样例验证，尚未全量重建20人数据或重新训练完整模型。现有冻结数据、标注、权重与正式数据指针保留原位。此前的版本封存脚本属于历史证据，不作为新入口。
 
-```bash
-cd wearable-ppg-dataset/src/heuristic_baselines/
-```
+## 复查说明（2026-11-13）
 
-#### 1.1 Dataset download
+HF模型包装入口要求显式指定`--data_dir`和`--task`，相对数据路径按调用位置解析。其他作者原模型中的默认目录及旧`--segment-dataset-manifest`分支原样保留，但新HF入口不会走这些旧默认/分支；分段数据使用`hrv.v46.model`。
 
-Use **Download Dataset** above.
+v4.6训练按历史的参与者、参与者内窗口打乱顺序分批；目标固定为Kazemi五点标记，解码固定300ms间距，不依赖外部同名环境变量。初始化顺序也与历史适配器对齐。HF baseline除新的按通道汇总外，另写`historical_*_summary.csv`保留原参与者平均口径，两种汇总不可混称。
 
-#### 1.2 Edit `config.py`
-
-Set these fields in `src/heuristic_baselines/config.py`:
-
-- **`HEURISTIC_DATA_SOURCE`**: **`"sample"`** (default) for the sample windowed data, or **`"full"`** for the full **`ppg_windowed_data`** tree.
-- **`HEURISTIC_PIPELINE_PARTICIPANTS`**: which participants to run (default `["P7", "P8"]`).
-- **`HEURISTIC_DEVICE_ROLES`**: devices to run (`Earring`, `Ring`, `Necklace`, `Watch`).
-- **`HEURISTIC_PPG_CHANNELS`**: channels (`ppg_green`, `ppg_ir`).
-- **`HEURISTIC_ALGORITHMS`**: heuristic methods among `pwd`, `msptd`, `fft`, `autocorr`, `heartpy`, `neurokit`, `qppgfast` (default runs only `neurokit`).
-- **`HEURISTIC_RUN_PREPROCESS`**: if **`True`** (default), apply detrend + bandpass and write cached **`outputs/<Px>/<stem>_preprocess.npz`** next to CSVs; if **`False`**, algorithms read the raw window NPZ fields directly.
-
-With the file-folders layout in **Download Dataset**, the default **`config.py`** is enough: **`pip install -r requirements.txt`**, then **`python runner.py`**.
-
-#### 1.3 Run
-
-```bash
-pip install -r requirements.txt
-python runner.py
-```
-For the default sample-data setup, a full heuristic run typically takes about **16 minutes** in total.
-
----
-
-### 2. Run Supervised Baselines
-
-All commands below are run from `wearable-ppg-dataset/src/model_baselines/` with `PYTHONPATH=.`:
-```bash
-cd wearable-ppg-dataset/src/model_baselines/
-```
-
-#### Set up environment
-```bash
-conda env create -f environment.yaml
-conda activate water
-```
-
-> If `conda activate` fails, run `conda init` once and restart your shell.
-
-#### Quick smoke test
-> ⚠️ **Smoke-test results are not meaningful.** The bundled `sample_data/` contains only 2 participants, leaving each LOSO fold with a single training participant. The model will collapse to predicting a constant (you'll see `R: 0.0000` and high MAE). This is expected — it confirms the pipeline runs end-to-end, not that the model works. **Real numbers require the full 20-participant dataset.**
-
-Run an end-to-end check on the sample data (resnet method, earring site):
-
-```bash
-PYTHONPATH=. python quickstart.py
-```
-Expected runtime: ~5 minutes on a single NVIDIA H100.
-
-**Setting `--data_dir` (commands 2.1–2.4).** 
-The default `--data_dir` points to the full dataset, so **if you have not downloaded the full dataset**, you must override it to use the sample data:
->
-> ```
-> --data_dir ../../../Multisite-PPG/sample_data/ppg_windowed_data
-> ```
->
-> If you omit `--data_dir`, the script defaults to the full-dataset path.
-
-#### 2.1 Supervised Baseline (Single Device)
-
-```bash
-# --position: earring | ring | watch | necklace
-# --backbone: FCN | DCL | cnn_lstm | LSTM | Transformer | resnet
-PYTHONPATH=. python supervised/main_supervised_baseline.py \
-    --dataset ppg --position earring --backbone resnet --data_dir <path>
-
-```
-Expected runtime: ~5 minutes on a single NVIDIA H100 for sample data.
-
-See [`src/model_baselines/README.md`](src/model_baselines/README.md) for the full list of arguments.
-
-#### 2.2 Self-Supervised Baseline (Single Device)
-
-```bash
-# BYOL
-PYTHONPATH=. python self_supervised/main_byol.py --dataset ppg --position earring --cuda 0 --data_dir <path>
-
-# SimCLR
-PYTHONPATH=. python self_supervised/main_simclr.py --dataset ppg --position earring --cuda 0 --data_dir <path>
-
-```
-Expected runtime: ~20 minutes on a single NVIDIA H100 for sample data.
-
-See [`src/model_baselines/self_supervised/README.md`](src/model_baselines/self_supervised/README.md) for BYOL and SimCLR hyperparameters.
-
-#### 2.3 Multi-Site fusion (4-Device Aligned)
-
-> ⚠️ **Run alignment once before any multi-site command.** This caches the 4-device aligned tensor so subsequent runs reuse it.
-
-```bash
-PYTHONPATH=. python multisite/aligned_4device.py --data_dir <path>
-```
-
-Then run 4-device fusion:
-```bash
-# 4-device green channel
-PYTHONPATH=. python supervised/main_supervised_baseline.py \
-    --dataset multisite --backbone resnet --data_dir <path>
-
-# Device-subset sweep (0=earring 1=ring 2=watch 3=necklace):
-PYTHONPATH=. python multisite/run_multisite_subset.py --backbone resnet --devices 0,1 --data_dir <path>
-```
-Expected runtime: ~15 minutes on a single NVIDIA H100 for sample data.
-
-#### 2.4 PPG-Motion Fusion (multimodal)
-This adds a second modality (e.g., accelerometer) on top of the 4-device green PPG.
-
-```bash
-# Generate aligned tensor with the additional modality
-PYTHONPATH=. python multisite/aligned_4device.py --data_dir <path> --modality accel
-```
-Then run fusion:
-```bash
-# 4-device green + accel_z
-PYTHONPATH=. python multisite/main_supervised_baseline_accel.py --backbone resnet --data_dir <path>
-```
-Expected runtime: ~15 minutes on a single NVIDIA H100 for sample data.
-
----
-
-### 3. (Optional) Prepare Windowed Dataset with Different Window Size
-
-Use this only if you want to **re-window raw recordings** (e.g. change window length or stride). All commands below are run from `wearable-ppg-dataset/src/prepare_windowed_dataset/`:
-
-```bash
-cd wearable-ppg-dataset/src/prepare_windowed_dataset/
-```
-
-#### 3.1 Dataset download
-
-Use **Download Dataset** above.
-
-#### 3.2 Code + dataset folders
-
-Put **`wearable-ppg-dataset`** (the repo from GitHub) and **`Multisite-PPG`** (the folder created by `snapshot_download` from HuggingFace) **in the same parent folder**. Don’t move or rename anything inside them—the runner resolves raw-data paths automatically.
-
-#### 3.3 Edit `config.py`
-
-Set these fields in `src/prepare_windowed_dataset/config.py`:
-
-- **`WINDOW_DATA_SOURCE`**: **`"sample"`** (default) uses `sample_data/raw_data`; **`"full"`** uses `raw_data`.
-- **`PIPELINE_PARTICIPANTS`**: participants to run (default `["P7", "P8"]`).
-- **`WEARABLE_DEVICE_ROLES`**: devices to run (default `("Earring",)`).
-- **`ALIGNMENT_WINDOW_SEC`**: window length in seconds.
-- **`ALIGNMENT_WINDOW_STRIDE_SEC`**: window stride in seconds.
-- **`ECG_FS`**, **`PPG_WINDOW_GAP_THRESHOLD_MS`**, **`ECG_MIN_SAMPLES_FRAC`**: ECG/PPG quality and overlap settings used by the pipeline.
-
-With the layout in **3.2**, the default **`config.py`** is enough for a sample run.
-
-#### 3.4 Run
-
-```bash
-pip install -r requirements.txt
-python run_pipeline.py
-```
-
----
-
-## License
-
-**Code:** Released under [GNU General Public License v3.0](./LICENSE) (GPL-3.0). Portions are derived from [WildPPG](https://github.com/eth-siplab/WildPPG), also licensed under GPL-3.0.
-
-**Dataset:** Released under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
-
-
+仓库外qppg残差实验需显式提供`--qppg-feature-csv`；不再默认读取旧特征缓存。

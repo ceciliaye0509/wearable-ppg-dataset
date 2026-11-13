@@ -58,3 +58,8 @@ src/model_baselines/supervised/.ipynb_checkpoints/
 .env
 .env.*
 !.env.example
+
+# Independent HRV runtime outputs
+/outputs/
+/data/
+*.egg-info/

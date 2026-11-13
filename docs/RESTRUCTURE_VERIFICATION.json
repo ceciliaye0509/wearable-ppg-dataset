@@ -1,0 +1,155 @@
+{
+  "date": "2026-11-13",
+  "scope": "independent generation refactor, no full-cohort rebuild or full retraining",
+  "reference_image": "69f20da5ebdb",
+  "unit_tests": 14,
+  "integration": {
+    "unit_tests": 10,
+    "hf_nonempty_generation": true,
+    "hf_rawslots_exact": true,
+    "hf_baseline": true,
+    "v46_generation": true,
+    "v46_baseline": true,
+    "v46_model_eval": true,
+    "actual_training_steps": 1,
+    "private_model_imports": 2
+  },
+  "fixed_v46_cases": [
+    {
+      "participant": "P9",
+      "window": 1350,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 8.78208041191101
+    },
+    {
+      "participant": "P14",
+      "window": 350,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 12.960975885391235
+    },
+    {
+      "participant": "P3",
+      "window": 2644,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 21.08681845664978
+    },
+    {
+      "participant": "P18",
+      "window": 1465,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 11.216844320297241
+    },
+    {
+      "participant": "P11",
+      "window": 0,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 7.638974666595459
+    },
+    {
+      "participant": "P12",
+      "window": 0,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 6.2253289222717285
+    },
+    {
+      "participant": "P1",
+      "window": 6,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 3.4437620639801025
+    },
+    {
+      "participant": "P2",
+      "window": 0,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 13.23668122291565
+    }
+  ],
+  "human_scope_windows": 117,
+  "human_scope_accepted_peak_sequences_and_HRV_match": true,
+  "hf_source_commit": "bcf9cf4",
+  "production_cross_version_imports": false,
+  "production_analysis_script_imports": false,
+  "other_author_model_files": 46,
+  "other_author_model_files_byte_identical": true,
+  "moved": [
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/src/heuristic_baselines"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/prepare_windowed_dataset",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/src/prepare_windowed_dataset"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/ml_hrv",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/src/ml_hrv"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/docs",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/docs"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/experiments",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/experiments"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/research",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/research"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/tests",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/tests"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/artifacts",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/artifacts"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/.ipynb_checkpoints",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/.ipynb_checkpoints"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/tools",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/tools"
+    },
+    {
+      "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/requirements",
+      "destination": "/Users/jiqiyu/Desktop/Daily_HRV/research_workspace/archive/legacy_source/requirements"
+    }
+  ],
+  "post_install_checks": {
+    "installed_entrypoints": 9,
+    "unit_tests": 10,
+    "unchanged_other_author_model_files": 46,
+    "old_packages_outside_repository": true,
+    "installed_model_eval": true,
+    "scipy_comparator": true
+  },
+  "per_window_detector_failure_preserved": true,
+  "recheck_file": "RECHECK_20261113.json",
+  "recheck_training_steps_bit_identical": 4
+}

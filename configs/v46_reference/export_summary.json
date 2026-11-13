@@ -1,0 +1,102 @@
+{
+  "P1": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P10": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P11": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P12": {
+    "patches": 0,
+    "exceptions": 1,
+    "manual_rejections": 0
+  },
+  "P13": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P14": {
+    "patches": 9,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P15": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P16": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P17": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P18": {
+    "patches": 3,
+    "exceptions": 1,
+    "manual_rejections": 0
+  },
+  "P19": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 4
+  },
+  "P2": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P20": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P3": {
+    "patches": 26,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P4": {
+    "patches": 57,
+    "exceptions": 1,
+    "manual_rejections": 2
+  },
+  "P5": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P6": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P7": {
+    "patches": 0,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P8": {
+    "patches": 41,
+    "exceptions": 0,
+    "manual_rejections": 0
+  },
+  "P9": {
+    "patches": 1,
+    "exceptions": 1,
+    "manual_rejections": 1
+  }
+}

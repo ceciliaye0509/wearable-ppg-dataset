@@ -20,6 +20,17 @@ Usage:
         --backbone DCL --data_dir /path/to/data --cuda 0
 """
 
+import sys as _segment_sys
+from pathlib import Path as _SegmentPath
+if __name__ == '__main__' and '--segment-dataset-manifest' in _segment_sys.argv:
+    _segment_sys.path.insert(0, str(_SegmentPath(__file__).resolve().parents[2]))
+    from ml_hrv.segment250.cli import main as _segment_main
+    raise SystemExit(_segment_main())
+if __name__ == '__main__' and '--data_dir' in _segment_sys.argv:
+    _i = _segment_sys.argv.index('--data_dir') + 1
+    if _i < len(_segment_sys.argv) and (_SegmentPath(_segment_sys.argv[_i]) / 'dataset_manifest.json').is_file():
+        raise SystemExit('SEGMENT_DATASET_REQUIRES_EXPLICIT_MASKED_ENTRY: use --segment-dataset-manifest')
+
 import os
 import random
 import logging

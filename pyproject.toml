@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wearable-ppg-hrv"
+version = "4.6.0"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy", "pandas", "neurokit2"]
+
+[project.optional-dependencies]
+model = ["torch"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["hrv*", "model_baselines*"]

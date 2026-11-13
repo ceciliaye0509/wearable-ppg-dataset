@@ -1,0 +1,137 @@
+[
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/prepare_windowed_dataset/generate_rawaligned_4device_dataset.py",
+    "definitions": [
+      "_candidate_windows",
+      "_boundary_offsets_ms"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/prepare_windowed_dataset/generate_rawaligned_4device_dataset.py",
+    "definitions": [
+      "_resample_to_grid",
+      "_infer_fs_ms",
+      "_ecg_fs_from_raw",
+      "_object_array_cast",
+      "_accel_gravity_reference",
+      "_accel_mean_magnitude_window",
+      "_accel_motion_mean_magnitude_window"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/prepare_windowed_dataset/generate_rawslots_training_stride30_dataset.py",
+    "definitions": [
+      "_rawslots_to_grid"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/algorithms/hrv.py",
+    "definitions": [
+      "_correct_ibi_artifacts_with_ratio"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/analysis/ecg_guarded_startup_full_eval_20261029_side_v1/rebuild_shadow.py",
+    "definitions": [
+      "stat",
+      "compute"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/analysis/v45_fresh_ppg_enhanced_shadow_20261106/policies.py",
+    "definitions": [
+      "canonical_source",
+      "bounded_resample",
+      "support_gap",
+      "flat"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/analysis/v45_gap_policy_shadow_20261106/common.py",
+    "definitions": [
+      "segment_support"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/analysis/ecg_context_guard_20261029_side_v1/context_guard.py",
+    "definitions": [
+      "PaddingGuard",
+      "select"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/analysis/ecg_detector_freeze_20261023_v1/frozen_rules.py",
+    "definitions": [
+      "technical_reasons"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/analysis/ecg_five_participant_reassessment_20261030_v1/reassess.py",
+    "definitions": [
+      "CentralGate"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/evaluate_assisted_human_confirmed_rpeaks.py",
+    "definitions": [
+      "infer_fs",
+      "refine_to_local_qrs_extreme"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Documents/Codex/2026-11-12/referenced-chatgpt-conversation-this-is-an/work/restructure/hf_raw_helpers.py",
+    "definitions": [
+      "_raw_path",
+      "_load_ppg_raw",
+      "_load_ecg_raw",
+      "_participant_ids"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Documents/Codex/2026-11-12/referenced-chatgpt-conversation-this-is-an/work/restructure/hf_raw_helpers.py",
+    "definitions": [
+      "_ecg_label_for_window"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Documents/Codex/2026-11-12/referenced-chatgpt-conversation-this-is-an/work/restructure/hf_generator.py",
+    "definitions": [
+      "_hrv_from_intervals",
+      "_canonical_ecg_label",
+      "_write_readme",
+      "generate_participant",
+      "main"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/preprocess.py",
+    "definitions": [
+      "bandpass_filter"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/evaluate_rawslots_baseline_ablation.py",
+    "definitions": [
+      "_finite_runs",
+      "_score_ibi_train",
+      "_peak_to_foot_indices"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/heuristic_baselines/evaluate_rawslots_detector_fiducials.py",
+    "definitions": [
+      "_bandpass_or_original",
+      "_detect_scipy",
+      "_detect_oriented",
+      "_waveform_polarity_score",
+      "_waveform_consensus_polarity",
+      "_choose_polarity_detector"
+    ]
+  },
+  {
+    "source": "/Users/jiqiyu/Desktop/Daily_HRV/analysis/v45_gap_policy_shadow_20261106/evaluate.py",
+    "definitions": [
+      "summarize_nn"
+    ]
+  }
+]

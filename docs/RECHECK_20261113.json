@@ -1,0 +1,179 @@
+{
+  "date": "2026-11-13",
+  "tmux_session": "hrv_recheck_20261113",
+  "status": "complete",
+  "isolated_generation": {
+    "generation": [
+      "hf_rawslot",
+      "v46"
+    ],
+    "baseline": [
+      "hf_rawslot",
+      "v46"
+    ],
+    "models": [
+      "HF loader/forward/loss",
+      "v46 eval"
+    ],
+    "old_directories_mounted": false,
+    "old_paths_opened": false
+  },
+  "source_comparison": {
+    "hf_generation": {
+      "_hrv_from_intervals": true,
+      "_canonical_ecg_label": true,
+      "generate_participant": true
+    },
+    "hf_ecg": {
+      "_ecg_label_for_window": true,
+      "_simple_ecg_qrs_sqi": true
+    },
+    "cutting": {
+      "_candidate_windows": true,
+      "_boundary_offsets_ms": true
+    },
+    "shared_signals": {
+      "_resample_to_grid": true,
+      "_infer_fs_ms": true,
+      "_ecg_fs_from_raw": true,
+      "_accel_gravity_reference": true,
+      "_accel_mean_magnitude_window": true,
+      "_accel_motion_mean_magnitude_window": true
+    },
+    "own_network": {
+      "RawContinuousHRVModel": true
+    },
+    "other_author_models_unchanged": true,
+    "v46_training_historical_shuffle_present": true,
+    "v46_targets_independent_of_inherited_environment": true,
+    "findings": []
+  },
+  "training_equivalence": {
+    "epochs": 2,
+    "optimizer_steps": 4,
+    "training_order_exact": true,
+    "loss_trace_exact": true,
+    "checkpoint_tensors_bit_identical": true,
+    "validation_loss_exact": true,
+    "targets_with_no_environment_exact": true
+  },
+  "final_checks": {
+    "unit_tests": 14,
+    "hf_baseline_detector_channel_comparisons": 12,
+    "hf_baseline_predictions_exact": true,
+    "historical_participant_weighted_reporting_exact": true,
+    "private_model_definitions_exact": 12,
+    "other_author_files_unchanged": 46,
+    "active_private_old_input_paths": false,
+    "relative_path_forwarding": true,
+    "residual_other_author_branch": [
+      {
+        "path": "/Users/jiqiyu/Desktop/Daily_HRV/wearable-ppg-dataset/src/model_baselines/supervised/main_supervised_group4_kazemi_decoder_score.py",
+        "line": 27,
+        "status": "unchanged other-author file; dormant legacy --segment-dataset-manifest branch; not used by either new entry"
+      }
+    ]
+  },
+  "entry_contracts": {
+    "no_legacy_default_directory_fallback": true,
+    "no_dormant_segment_branch": true,
+    "caller_relative_path_correct": true,
+    "other_author_source_unmodified": true
+  },
+  "fixed_v46_cases": [
+    {
+      "participant": "P9",
+      "window": 1350,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 7.800188302993774
+    },
+    {
+      "participant": "P14",
+      "window": 350,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 8.399791955947876
+    },
+    {
+      "participant": "P3",
+      "window": 2644,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 20.853710651397705
+    },
+    {
+      "participant": "P18",
+      "window": 1465,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 10.674477100372314
+    },
+    {
+      "participant": "P11",
+      "window": 0,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 7.592880487442017
+    },
+    {
+      "participant": "P12",
+      "window": 0,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 5.749092102050781
+    },
+    {
+      "participant": "P1",
+      "window": 6,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 2.891678810119629
+    },
+    {
+      "participant": "P2",
+      "window": 0,
+      "ECG_exact": true,
+      "PPG_masks_exact": true,
+      "model_features_targets_probabilities_exact": true,
+      "baseline_six_channels_exact": true,
+      "seconds": 13.361849308013916
+    }
+  ],
+  "reviewed_ECG_windows": 117,
+  "fixes": [
+    "Restore participant/within-participant epoch shuffling, participant-homogeneous batches and historical RNG initialization progression.",
+    "Use fixed five-bin Kazemi targets and frozen peak decoder parameters without inheriting external environment variables.",
+    "Restore historical HF participant-weighted baseline reports alongside clearly separate pooled-channel reports.",
+    "Correct caller-relative HF dataset arguments and require explicit --data_dir/--task; block dormant old segmented switch in the owned wrapper.",
+    "Remove old qppg feature-cache defaults from private research configs; require explicit --qppg-feature-csv."
+  ],
+  "unchanged": {
+    "other_author_model_files": 46,
+    "other_author_model_file_hashes_match": true,
+    "private_network_definitions_exact": 12
+  },
+  "intentional_format_changes": [
+    "v46 output uses 32-window NPZ shards and a dataset manifest rather than historical overlay/base files.",
+    "New summaries and CSV names are not byte-compatible with all historical reports; historical HF weighting is exported separately."
+  ],
+  "limits": [
+    "No full-cohort PPG/ECG regeneration or complete new training run was performed.",
+    "v46 reconstruction requires its version-bound human annotations, sign operations and raw source revision in addition to raw waveforms.",
+    "One dormant legacy branch remains in an unchanged other-author file; the new wrappers do not invoke it."
+  ]
+}

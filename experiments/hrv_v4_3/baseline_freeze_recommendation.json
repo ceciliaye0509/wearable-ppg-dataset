@@ -1,9 +1,0 @@
-{
-  "original_primary": "qppgfast_devicewise_corr",
-  "train_selected_alternative": null,
-  "holdout_criteria": {},
-  "recommended_primary": "qppgfast_devicewise_corr",
-  "change_recommended": false,
-  "predeclared_acceptance_unchanged": true,
-  "ECG_target_not_selected_by_PPG_scores": true
-}
