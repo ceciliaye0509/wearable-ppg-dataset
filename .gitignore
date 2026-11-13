@@ -58,3 +58,10 @@ src/model_baselines/supervised/.ipynb_checkpoints/
 .env
 .env.*
 !.env.example
+
+# Private ECG annotation packages and browser QA artifacts
+/review_platform/private_packages/
+/review_platform/qa/
+/review_platform/history_package/
+*.ecgreview
+*.ecgprogress

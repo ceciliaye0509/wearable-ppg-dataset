@@ -48,7 +48,7 @@ def worker(pid,out_dir):
 def freeze(out):
  out.mkdir(mode=0o700);f=out/'frozen_sources';f.mkdir()
  original=ROOT/'analysis/ecg_direction_stability_diagnostics_20261029_v1/evaluate.py'
- gate=HERE/'direction_gate_review.py'
+ gate=HERE/'interval_quality.py'
  pieces=[]
  for path,names in [(original,{'refined_method','simple','local_recovery','stable'}),(gate,{'aggregate_quarters'})]:
   text=path.read_text();tree=ast.parse(text)

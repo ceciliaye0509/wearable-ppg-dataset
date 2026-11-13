@@ -7,6 +7,14 @@ historical Hugging Face downloads below do not contain this release.
 The model comparison configuration is prepared for M1 adaptation, not yet a
 completed training run.
 
+## ECG annotation website (Cloudflare Pages)
+
+The sole maintained review website is [`review_platform/`](review_platform/README.md).
+Deploy its `dist/` folder to Cloudflare Pages. It reads ZIP packages entirely in the browser,
+including a read-only historical annotation archive organized by segment duration and
+Random / Difficult. Legacy Python review servers and duplicate frontend copies were removed.
+Research waveforms, annotations, package ZIPs and credentials are never committed here.
+
 ## Quick Start
 
 This repository provides baselines for heart rate estimation from PPG signals collected across four wearable sites (ring, earring, necklace, watch) in an in-the-wild setting. You can run heuristic baselines, supervised deep learning baselines, or optionally re-prepare the windowed dataset with a different window size.

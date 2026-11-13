@@ -79,7 +79,7 @@ def eligibility_reasons(t, x, row):
 def migrate_labels(old_packet_file, new_packet_file, source_db, destination_db):
     """Copy only this round's absolute labels verbatim, including their history."""
     sys.path.insert(0, str(HERE))
-    from polarity_audit.serve_audit import initialize_database
+    from ecg_review_packets.legacy_labels import initialize_database
     if destination_db.exists():
         raise ValueError('Refusing to overwrite an existing label database')
     with gzip.open(old_packet_file, 'rt') as f:

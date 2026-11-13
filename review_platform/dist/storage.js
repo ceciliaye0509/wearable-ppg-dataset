@@ -1,0 +1,8 @@
+(function(root){
+  'use strict'; let dbPromise;
+  function db(){return dbPromise ||= new Promise((resolve,reject)=>{const r=indexedDB.open('daily-hrv-local-review-v1',1);r.onupgradeneeded=()=>{for(const name of ['sessions','handles'])r.result.createObjectStore(name);};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.onblocked=()=>reject(new Error('The database is blocked by an older page. Close other review tabs and retry.'));});}
+  async function get(store,key){const d=await db();return new Promise((resolve,reject)=>{const r=d.transaction(store).objectStore(store).get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+  async function put(store,key,value){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction(store,'readwrite');tx.objectStore(store).put(value,key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Local save was aborted.'));});}
+  async function saveSession(key,backup,expectedRevision){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction('sessions','readwrite'),s=tx.objectStore('sessions'),r=s.get(key);let conflict=false;r.onsuccess=()=>{if((r.result?.revision||0)!==expectedRevision){conflict=true;tx.abort();return;}s.put({revision:expectedRevision+1,backup},key);};tx.oncomplete=()=>resolve(expectedRevision+1);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(new Error(conflict?'Another tab changed this reviewer’s progress. Export a backup, then reopen the package to avoid overwriting.':'Local save failed. Download a backup now and check browser storage.'));});}
+  root.ECGStore={get,put,saveSession};
+})(window);

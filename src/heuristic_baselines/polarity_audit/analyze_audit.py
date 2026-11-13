@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 
 from build_audit import DEFAULT_OUT, read_rows
-from serve_audit import read_ratings
+from ecg_review_packets.legacy_labels import read_ratings
 
 
 def weighted_proportion(sample, strata, values):
